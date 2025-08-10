@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Callable, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Callable
 import difflib
 import time
 import uuid
@@ -8,7 +8,7 @@ import os
 import requests
 import json
 
-
+from dataset import dataset  # Assuming dataset.py is in the same directory
 # -------------------------
 # Core data structures
 # -------------------------
@@ -60,13 +60,15 @@ class Model(Protocol):
 class EchoModel:
     name = "echo-model"
     def generate(self, prompt: str, temperature: float = 0.0, **kwargs) -> ModelResponse:
-        # Echoes last line as "answer"
         last = prompt.strip().splitlines()[-1] if prompt.strip() else ""
         txt = f"{last}"
-        # Pretend some token & cost math for instrumentation
         ptok = max(1, len(prompt)//4)
         ctok = max(1, len(txt)//4)
         return ModelResponse(text=txt, prompt_tokens=ptok, completion_tokens=ctok, cost=(ptok+ctok)*1e-6)
+
+# -------------------------
+# ScaleDown direct generator
+# -------------------------
 
 class ScaledownDirectModel:
     """
@@ -76,7 +78,7 @@ class ScaledownDirectModel:
     def __init__(
         self,
         api_key: str,
-        endpoint: str,
+        endpoint: str,                  # e.g., https://api.scaledown.xyz/<your-generate-endpoint>
         model: str = "gemini/gemini-pro",
         rate: float = 0.7,
         timeout: float = 30.0,
@@ -92,21 +94,28 @@ class ScaledownDirectModel:
 
     def generate(self, prompt: str, **kwargs) -> ModelResponse:
         params = {**self.default_params, **kwargs}
-
         payload = {
             "prompt": prompt,
             "model": self.model,
             "scaledown": {"rate": self.rate},
-            # REQUIRED by your deployment:
-            "context": params.pop("context", {}),  # always include; default to {}
+            # REQUIRED by your deployment: 'context' must be a STRING
+            "context": params.pop("context", ""),
         }
         if "temperature" in params and params["temperature"] is not None:
             payload["temperature"] = params["temperature"]
 
+        # final guard to force string context
+        if not isinstance(payload["context"], str):
+            payload["context"] = ""
+
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
+        # right before requests.post(...) in ScaledownDirectModel.generate:
+        if os.getenv("PIPE_DEBUG_HTTP", "0") != "0":
+            print("POST", self.endpoint, "payload:", json.dumps(payload)[:500])
+
         r = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout)
 
-        # If non-2xx, raise so stages can record the failure instead of using error JSON as an answer
+        # Treat non-2xx as error
         if r.status_code >= 400:
             snip = (r.text or "")[:300].replace("\n", "\\n")
             raise RuntimeError(f"ScaleDown HTTP {r.status_code}; body_snip={snip}")
@@ -114,32 +123,38 @@ class ScaledownDirectModel:
         ctype = (r.headers.get("Content-Type", "") or "").lower()
         raw = r.text or ""
         text = ""
+        data = None
 
         if "application/json" in ctype:
             try:
                 data = r.json()
             except Exception:
                 data = None
+
+            # Treat {"detail": ...} or {"error": ...} as failure
+            if isinstance(data, dict) and ("detail" in data or "error" in data):
+                snip = json.dumps(data)[:300]
+                raise RuntimeError(f"ScaleDown error JSON; body_snip={snip}")
+
             if isinstance(data, dict):
                 text = (
                     data.get("output")
                     or data.get("text")
                     or data.get("response")
                     or data.get("output_text")
-                    or (data.get("choices", [{}])[0].get("text", "")
+                    or (data.get("choices",[{}])[0].get("text","")
                         if isinstance(data.get("choices"), list) else "")
-                    or (data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    or (data.get("choices",[{}])[0].get("message",{}).get("content","")
                         if isinstance(data.get("choices"), list) else "")
                     or ""
                 )
 
         if not text:
             text = raw.strip()
-
         if not text:
             raise RuntimeError("ScaleDown call returned no usable text")
 
-        # best-effort accounting
+        # Best-effort usage accounting
         ptok = max(1, len(prompt)//4)
         ctok = max(1, len(text)//4)
         cost = (ptok + ctok) * 1e-6
@@ -152,11 +167,10 @@ class ScaledownDirectModel:
             meta={"status": r.status_code}
         )
 
-
-
 # -------------------------
 # Scaledown Wrapper for API usage
 # -------------------------
+
 class ScaleDownWrappedModel:
     """
     Wraps a base Model and compresses the prompt via ScaleDown before calling base.generate().
@@ -186,20 +200,34 @@ class ScaleDownWrappedModel:
         if self.only_on_min_chars and len(prompt) < self.only_on_min_chars:
             return prompt
 
-        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
+        headers = {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json",
+        }
         payload = {
             "prompt": prompt,
             "model": self.sd_model,
             "scaledown": {"rate": self.rate},
-            "context": ""  # string, not {}
+            # REQUIRED: context must be a string
+            "context": ""
         }
+
+        # final guard
+        if not isinstance(payload["context"], str):
+            payload["context"] = ""
+
         try:
-            r = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout_sec)
+            r = requests.post(
+                self.endpoint,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout_sec,
+            )
 
             if r.status_code >= 400:
                 raise RuntimeError(f"HTTP {r.status_code}")
 
-            ctype = (r.headers.get("Content-Type","") or "").lower()
+            ctype = (r.headers.get("Content-Type", "") or "").lower()
             body = r.text or ""
 
             if "application/json" in ctype:
@@ -207,9 +235,11 @@ class ScaleDownWrappedModel:
                     data = r.json()
                 except Exception:
                     raise RuntimeError("Invalid JSON")
+
                 if isinstance(data, dict) and ("detail" in data or "error" in data):
                     raise RuntimeError("ScaleDown error JSON")
-                for key in ("compressed_prompt","compressed","text","output"):
+
+                for key in ("compressed_prompt", "compressed", "text", "output"):
                     val = data.get(key)
                     if isinstance(val, str) and val.strip():
                         return val
@@ -222,74 +252,26 @@ class ScaleDownWrappedModel:
             raise RuntimeError("Empty/invalid text")
 
         except Exception:
-            return prompt  # graceful fallback
-
-
+            # Any problem: use the original prompt
+            return prompt
 
     def generate(self, prompt: str, **kwargs) -> ModelResponse:
-        params = {**self.default_params, **kwargs}
-        payload = {
-            "prompt": prompt,
-            "model": self.model,
-            "scaledown": {"rate": self.rate},
-            # REQUIRED by your deployment: context must be a STRING
-            "context": params.pop("context", ""),  # "" not {}
+        compressed = self._compress(prompt)
+        resp = self.base.generate(compressed, **kwargs)
+        resp.meta = {
+            **resp.meta,
+            "scaledown": {
+                "enabled": True,
+                "rate": self.rate,
+                "sd_model": self.sd_model,
+                "original_len": len(prompt),
+                "compressed_len": len(compressed),
+                "saved_chars": max(0, len(prompt) - len(compressed)),
+            }
         }
-        if "temperature" in params and params["temperature"] is not None:
-            payload["temperature"] = params["temperature"]
-
-        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
-        r = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout)
-
-        # Treat non-2xx as error
-        if r.status_code >= 400:
-            snip = (r.text or "")[:300].replace("\n", "\\n")
-            raise RuntimeError(f"ScaleDown HTTP {r.status_code}; body_snip={snip}")
-
-        ctype = (r.headers.get("Content-Type", "") or "").lower()
-        raw = r.text or ""
-        text = ""
-
-        data = None
-        if "application/json" in ctype:
-            try:
-                data = r.json()
-            except Exception:
-                data = None
-
-            # IMPORTANT: treat {"detail": ...} or {"error": ...} as failure
-            if isinstance(data, dict) and ("detail" in data or "error" in data):
-                snip = json.dumps(data)[:300]
-                raise RuntimeError(f"ScaleDown error JSON; body_snip={snip}")
-
-            if isinstance(data, dict):
-                text = (
-                    data.get("output") or data.get("text") or data.get("response")
-                    or data.get("output_text")
-                    or (data.get("choices",[{}])[0].get("text","")
-                        if isinstance(data.get("choices"), list) else "")
-                    or (data.get("choices",[{}])[0].get("message",{}).get("content","")
-                        if isinstance(data.get("choices"), list) else "")
-                    or ""
-                )
-
-        if not text:
-            text = raw.strip()
-        if not text:
-            raise RuntimeError("ScaleDown call returned no usable text")
-
-        ptok = max(1, len(prompt)//4)
-        ctok = max(1, len(text)//4)
-        cost = (ptok + ctok) * 1e-6
-
-        return ModelResponse(
-            text=text.strip(),
-            prompt_tokens=ptok,
-            completion_tokens=ctok,
-            cost=cost,
-            meta={"status": r.status_code}
-        )
-
+        resp.meta["base_model_name"] = getattr(self.base, "name", "unknown")
+        self.name = f"scaledown({resp.meta['base_model_name']})"
+        return resp
 
 # -------------------------
 # Gate policies (early exit)
@@ -315,8 +297,7 @@ class JudgeGate:   # online: ask a judge model “is this correct?”
             return False
         prompt = self.tpl.format(question=example.question, answer=candidate_answer)
         r = judge.generate(prompt, temperature=0.0)
-        # Expect judge to emit "PASS <p=0.87>" or "FAIL <p=0.12>" or a JSON line; adjust to your judge format.
-        txt = r.text.lower()
+        txt = (r.text or "").lower()
         p = 0.5
         if "p=" in txt:
             try:
@@ -355,19 +336,21 @@ class BaselineAsk:
     def __init__(self, id: str, model: Model, prompt_template: str):
         self.id, self.model, self.tpl = id, model, prompt_template
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
-        prompt = self.tpl.format(question=ex.question, prior_answer=ctx.get("last_answer",""))
+        prompt = self.tpl.format(question=ex.question)
         try:
             r = self.model.generate(prompt, temperature=0.0)
-            ans = r.text.strip()
-            usage = {"model": self.model.name, **r.__dict__}
-            return StageResult(self.id, ans or None, False,
-                            evidence={"prompt": prompt},
-                            model_usage=usage)
+            ans = (r.text or "").strip() or None
+            return StageResult(
+                stage_id=self.id, answer=ans, should_exit=False,
+                evidence={"prompt": prompt},
+                model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__}
+            )
         except Exception as e:
-            return StageResult(self.id, None, False,
-                            evidence={"prompt": prompt, "error": str(e)},
-                            model_usage={"model": self.model.name})
-
+            return StageResult(
+                stage_id=self.id, answer=None, should_exit=False,
+                evidence={"prompt": prompt, "error": str(e)},
+                model_usage={"model": getattr(self.model, "name", "unknown")}
+            )
 
 @register_stage("apo")
 class APOStage:
@@ -377,12 +360,11 @@ class APOStage:
         self.id, self.helper, self.target = id, helper, target
         self.rewrite_template = rewrite_template
         self.target_prompt_template = target_prompt_template
-
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
         evidence: Dict[str, Any] = {}
         usage: Dict[str, Any] = {}
 
-        # 1) Ask helper to produce an optimized prompt
+        # 1) helper rewrite
         helper_in = self.rewrite_template.format(question=ex.question)
         evidence["helper_in"] = helper_in
         try:
@@ -392,34 +374,20 @@ class APOStage:
             evidence["optimized"] = optimized
         except Exception as e:
             evidence["helper_error"] = str(e)
-            # fall back to original question if helper fails
-            optimized = ex.question
+            optimized = ex.question  # fallback
 
-        # 2) Ask target using the optimized prompt
+        # 2) target answer
         target_in = self.target_prompt_template.format(optimized_prompt=optimized)
         evidence["target_in"] = target_in
         try:
             t = self.target.generate(target_in, temperature=0.0)
             ans = (t.text or "").strip() or None
             usage["target"] = {"model": getattr(self.target, "name", "unknown"), **t.__dict__}
-            return StageResult(
-                stage_id=self.id,
-                answer=ans,
-                should_exit=False,
-                evidence=evidence,
-                model_usage=usage
-            )
+            return StageResult(self.id, ans, False, evidence=evidence, model_usage=usage)
         except Exception as e:
             evidence["target_error"] = str(e)
-            return StageResult(
-                stage_id=self.id,
-                answer=None,
-                should_exit=False,
-                evidence=evidence,
-                model_usage=usage if usage else {"model": getattr(self.target, "name", "unknown")}
-            )
-
-
+            return StageResult(self.id, None, False, evidence=evidence,
+                               model_usage=usage if usage else {"model": getattr(self.target, "name", "unknown")})
 
 @register_stage("cove")
 class CoVeStage:
@@ -427,60 +395,50 @@ class CoVeStage:
     def __init__(self, id: str, model: Model, cove_template: str):
         self.id, self.model, self.tpl = id, model, cove_template
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
-        prompt = self.tpl.format(question=ex.question, prior_answer=ctx.get("last_answer",""))
+        prev_ans = ctx.get("last_answer", "")
+        prompt = self.tpl.format(question=ex.question, prior_answer=prev_ans)
         try:
             r = self.model.generate(prompt, temperature=0.0)
-            ans = r.text.strip()
-            usage = {"model": self.model.name, **r.__dict__}
-            return StageResult(self.id, ans or None, False,
-                            evidence={"prompt": prompt},
-                            model_usage=usage)
+            ans = (r.text or "").strip() or None
+            return StageResult(self.id, ans, False, evidence={"prompt": prompt},
+                               model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__})
         except Exception as e:
-            return StageResult(self.id, None, False,
-                            evidence={"prompt": prompt, "error": str(e)},
-                            model_usage={"model": self.model.name})
-
+            return StageResult(self.id, None, False, evidence={"prompt": prompt, "error": str(e)},
+                               model_usage={"model": getattr(self.model, "name", "unknown")})
 
 @register_stage("self_correct")
 class SelfCorrectStage:
     def __init__(self, id: str, model: Model, template: str):
         self.id, self.model, self.tpl = id, model, template
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
-        prompt = self.tpl.format(question=ex.question, prior_answer=ctx.get("last_answer",""))
+        prev_ans = ctx.get("last_answer", "")
+        prompt = self.tpl.format(question=ex.question, prior_answer=prev_ans)
         try:
             r = self.model.generate(prompt, temperature=0.0)
-            ans = r.text.strip()
-            usage = {"model": self.model.name, **r.__dict__}
-            return StageResult(self.id, ans or None, False,
-                            evidence={"prompt": prompt},
-                            model_usage=usage)
+            ans = (r.text or "").strip() or None
+            return StageResult(self.id, ans, False, evidence={"prompt": prompt},
+                               model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__})
         except Exception as e:
-            return StageResult(self.id, None, False,
-                            evidence={"prompt": prompt, "error": str(e)},
-                            model_usage={"model": self.model.name})
-
+            return StageResult(self.id, None, False, evidence={"prompt": prompt, "error": str(e)},
+                               model_usage={"model": getattr(self.model, "name", "unknown")})
 
 @register_stage("judge")
 class ExternalJudgeStage:
     """Optionally emits should_exit based on judge verdict or returns a verdict for the runner to use."""
-    def __init__(self, id: str, judge: Model, judge_template: str,
-                 exit_on_pass: bool = True, threshold: float = 0.5):
+    def __init__(self, id: str, judge: Model, judge_template: str, exit_on_pass: bool = True, threshold: float = 0.5):
         self.id = id
         self.judge = judge
         self.tpl = judge_template
         self.exit_on_pass = exit_on_pass
         self.threshold = threshold
-
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
-        cand = ctx.get("last_answer", "")  # candidate answer from previous stage(s)
+        cand = ctx.get("last_answer", "")
         prompt = self.tpl.format(question=ex.question, answer=cand)
         evidence = {"prompt": prompt}
         try:
             r = self.judge.generate(prompt, temperature=0.0)
             verdict = (r.text or "").strip().lower()
             evidence["verdict"] = verdict
-
-            # Parse optional probability like "PASS <p=0.82>"
             p = 0.5
             if "p=" in verdict:
                 try:
@@ -488,29 +446,24 @@ class ExternalJudgeStage:
                 except Exception:
                     p = 0.5
             evidence["p"] = p
-
             is_pass = ("pass" in verdict)
             exit_flag = bool(self.exit_on_pass and is_pass and (p >= self.threshold))
-
             return StageResult(
                 stage_id=self.id,
-                answer=cand,  # judge doesn't change content, only validates
+                answer=cand or None,
                 should_exit=exit_flag,
                 evidence=evidence,
-                model_usage={"model": getattr(self.judge, "name", "unknown"),
-                             **r.__dict__}
+                model_usage={"model": getattr(self.judge, "name", "unknown"), **r.__dict__}
             )
         except Exception as e:
             evidence["error"] = str(e)
             return StageResult(
                 stage_id=self.id,
                 answer=cand or None,
-                should_exit=False,          # don't early-exit on judge failure
+                should_exit=False,
                 evidence=evidence,
                 model_usage={"model": getattr(self.judge, "name", "unknown")}
             )
-
-
 
 # -------------------------
 # Pipeline runner
@@ -522,12 +475,20 @@ class Pipeline:
         stages: List[Stage],
         gate: GatePolicy,
         judge_for_gate: Optional[Model] = None,
-        do_token_diffs: bool = True
+        do_token_diffs: bool = True,
+        debug: bool = False,            # <-- new
+        debug_maxlen: int = 220         # <-- new
     ):
         self.stages = stages
         self.gate = gate
         self.judge_for_gate = judge_for_gate
         self.do_token_diffs = do_token_diffs
+        self.debug = debug
+        self.debug_maxlen = debug_maxlen
+
+    def _dbg(self, *parts):
+        if self.debug:
+            print(*parts)
 
     def run_one(self, ex: Example) -> RunTrace:
         t0 = time.time()
@@ -535,59 +496,97 @@ class Pipeline:
         ctx: Dict[str, Any] = {}
         last_answer: Optional[str] = None
 
+        self._dbg(f"\n=== RUN {ex.qid} :: {ex.question!r} ===")
+
         for stage in self.stages:
             if last_answer is not None:
                 ctx["last_answer"] = last_answer
 
+            self._dbg(f"\n-- Stage {getattr(stage,'id','?')} ({stage.__class__.__name__}) --")
+
             res = stage.run(ex, ctx)
             trace.stage_results.append(res)
 
-            # accounting
-            def add_usage(u):
-                if not u: return
+            # Debug: show prompt/evidence/errors
+            ev = res.evidence or {}
+            prompt_snip = (ev.get("prompt") or ev.get("helper_in") or ev.get("target_in") or "")
+            if prompt_snip:
+                self._dbg("Prompt:", (prompt_snip[:self.debug_maxlen] + ("..." if len(prompt_snip) > self.debug_maxlen else "")))
+
+            if "optimized" in ev:
+                self._dbg("Optimized:", (ev["optimized"][:self.debug_maxlen] + ("..." if len(ev["optimized"]) > self.debug_maxlen else "")))
+
+            if "error" in ev or "helper_error" in ev or "target_error" in ev:
+                for k in ("error","helper_error","target_error"):
+                    if k in ev:
+                        self._dbg(f"ERROR ({k}):", ev[k])
+
+            # usage accounting helper
+            # inside Pipeline.run_one()
+
+            def add_usage(u: Dict[str, Any]):
+                if not isinstance(u, dict):
+                    return
                 if "prompt_tokens" in u: trace.total_tokens += int(u["prompt_tokens"])
                 if "completion_tokens" in u: trace.total_tokens += int(u["completion_tokens"])
                 if "cost" in u: trace.total_cost += float(u["cost"])
 
-            # per-stage usage can be nested (APO helper/target)
+            def dbg_usage(u: Any, label="usage"):
+                if not self.debug or not isinstance(u, dict):
+                    return
+                model = u.get("model", "?")
+                status = (u.get("meta") or {}).get("status")
+                pt = u.get("prompt_tokens"); ct = u.get("completion_tokens")
+                self._dbg(f"{label}: model={model} status={status} ptok={pt} ctok={ct}")
+
+            # …
+
             if "prompt_tokens" in res.model_usage:
+                # flat usage dict (BaselineAsk etc.)
                 add_usage(res.model_usage)
+                dbg_usage(res.model_usage)
             else:
-                for _, sub in res.model_usage.items():
+                # nested usage dicts (APO helper/target)
+                for sub_label, sub in res.model_usage.items():
                     add_usage(sub)
+                    dbg_usage(sub, label=f"usage.{sub_label}")
+
 
             # candidate answer
             if res.answer is not None:
+                ans_snip = res.answer[:self.debug_maxlen] + ("..." if len(res.answer) > self.debug_maxlen else "")
+                self._dbg("Answer:", ans_snip)
                 if self.do_token_diffs and last_answer:
-                    diff = list(difflib.unified_diff(
-                        last_answer.split(), res.answer.split(), lineterm=""
-                    ))
-                    trace.artifacts[f"diff_{stage.id}"] = " ".join(diff[:4000])  # cap
+                    diff = list(difflib.unified_diff(last_answer.split(), res.answer.split(), lineterm=""))
+                    trace.artifacts[f"diff_{stage.id}"] = " ".join(diff[:4000])
                 last_answer = res.answer
+            else:
+                self._dbg("Answer: <None>")
 
-            # stage can signal exit itself (e.g., judge)
+            # stage-triggered exit?
             if res.should_exit:
+                self._dbg(f"Stage requested early exit at {getattr(stage,'id','?')}")
                 trace.final_answer = last_answer
-                trace.early_exit_at = stage.id
+                trace.early_exit_at = getattr(stage,'id','?')
                 break
 
-            # global gate after any stage that produced an answer
+            # global gate after any answer
             if last_answer:
                 if self.gate.should_exit(ex, last_answer, self.judge_for_gate):
+                    self._dbg(f"Gate requested early exit after {getattr(stage,'id','?')}")
                     trace.final_answer = last_answer
-                    trace.early_exit_at = f"gate_after:{stage.id}"
+                    trace.early_exit_at = f"gate_after:{getattr(stage,'id','?')}"
                     break
 
         if trace.final_answer is None:
             trace.final_answer = last_answer
         trace.timing_sec = time.time() - t0
+        self._dbg(f"=== DONE in {trace.timing_sec:.3f}s :: final={trace.final_answer!r} exit={trace.early_exit_at} tokens={trace.total_tokens} ===\n")
         return trace
 
 # -------------------------
 # Example config & factory
 # -------------------------
-
-
 
 DEFAULT_TEMPLATES = {
     "baseline": "Q: {question}\nA:",
@@ -626,19 +625,6 @@ def build_pipeline(
     config: Dict[str, Any],
     models: Dict[str, Model],
 ) -> Pipeline:
-    """
-    config example:
-    {
-      "stages": [
-        {"type": "baseline", "id": "s0", "model": "target"},
-        {"type": "apo", "id": "s1", "helper": "helper", "target": "target"},
-        {"type": "cove", "id": "s2", "model": "target"},
-        {"type": "self_correct", "id": "s3", "model": "target"},
-        {"type": "judge", "id": "s4", "judge": "judge", "exit_on_pass": True, "threshold": 0.7}
-      ],
-      "gate": {"mode": "judge", "judge": "judge", "threshold": 0.7}
-    }
-    """
     # Gate
     gate_cfg = config.get("gate", {"mode": "none"})
     if gate_cfg["mode"] == "oracle":
@@ -649,7 +635,6 @@ def build_pipeline(
         gate = JudgeGate(judge_prompt_template=jt, threshold=float(gate_cfg.get("threshold", 0.5)))
         gate_judge = models[gate_cfg["judge"]]
     else:
-        # no early exit gate (stages can still exit themselves)
         gate = OracleGate(lambda s: "__NO_EARLY_EXIT__")  # always false
         gate_judge = None
 
@@ -693,7 +678,6 @@ def build_pipeline(
                 threshold=float(s.get("threshold", 0.5))
             ))
         else:
-            # any custom/plug-in stage name is supported if registered
             kw = {k:v for k,v in s.items() if k not in {"type"}}
             stages.append(make_stage(t, **kw))
 
@@ -709,15 +693,11 @@ def build_pipeline(
 # -------------------------
 
 if __name__ == "__main__":
-    # Plug your real adapters here (OpenAI/Anthropic/vLLM). EchoModel is just a stub.
-
-    # Prefer env var; fall back to literal if you must.
-    SCALEDOWN_API_KEY = os.environ.get("SCALEDOWN_API_KEY", "YOUR_API_KEY")
-
+    # Read env
     SCALEDOWN_API_KEY = os.environ["SCALEDOWN_API_KEY"]
-    SCALEDOWN_CHAT_URL = os.environ["SCALEDOWN_CHAT_URL"]  # set this to your ScaleDown “generate” endpoint
+    SCALEDOWN_CHAT_URL = os.environ["SCALEDOWN_CHAT_URL"]  # your ScaleDown generation endpoint
 
-    models = {
+    models: Dict[str, Model] = {
         "target": ScaledownDirectModel(
             api_key=SCALEDOWN_API_KEY,
             endpoint=SCALEDOWN_CHAT_URL,
@@ -730,7 +710,6 @@ if __name__ == "__main__":
             model=os.getenv("SD_MODEL_HELPER", "gemini/gemini-pro"),
             rate=float(os.getenv("SD_RATE_HELPER", "0.6")),
         ),
-        # keep judge deterministic; you can set rate=0.0 if you prefer no compression there
         "judge": ScaledownDirectModel(
             api_key=SCALEDOWN_API_KEY,
             endpoint=SCALEDOWN_CHAT_URL,
@@ -738,8 +717,9 @@ if __name__ == "__main__":
             rate=float(os.getenv("SD_RATE_JUDGE", "0.0")),
             default_params={"temperature": 0.0},
         ),
+        # You could wrap any model with compression like:
+        # "target": ScaleDownWrappedModel(base=SomeOtherModel(...), api_key=SCALEDOWN_API_KEY, rate=0.7)
     }
-
 
     config = {
         "stages": [
@@ -753,10 +733,19 @@ if __name__ == "__main__":
         "token_diffs": True
     }
 
+    DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")
     pipe = build_pipeline(config, models)
-    ex = Example(qid=str(uuid.uuid4()), question="What is the capital of France?", y_true="Paris")
-    trace = pipe.run_one(ex)
-    print("Final:", trace.final_answer, "Exit at:", trace.early_exit_at, "Tokens:", trace.total_tokens)
-
+    # re-wrap with debug (or pass debug into a factory if you prefer)
+    pipe.debug = DEBUG
+    pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN", "220"))
 
     
+    for ex in dataset:
+        trace = pipe.run_one(ex)
+        print(f"[{ex.qid}] Q: {ex.question}")
+        print("  Final:", trace.final_answer)
+        print("  Exit at:", trace.early_exit_at)
+        print("  Tokens:", trace.total_tokens)
+        print("  Correct:", trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower())
+        print("-" * 50)
+    print("Final:", trace.final_answer, "Exit at:", trace.early_exit_at, "Tokens:", trace.total_tokens)
