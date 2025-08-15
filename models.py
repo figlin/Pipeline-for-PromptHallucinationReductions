@@ -9,7 +9,9 @@ import requests
 import json
 
 from dataset import dataset  # Assuming dataset.py is in the same directory
-
+from main import main
+from pipeline import pipeline
+from stages import stages
 
 # -------------------------
 # Model adapter protocol
