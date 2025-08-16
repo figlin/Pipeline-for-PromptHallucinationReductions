@@ -26,6 +26,8 @@ pip install requests
 
 ### Environment Variables
 
+Create an .env by copying the contents of the .env.example
+
 Set these variables in your environment before running:
 
 | Variable              | Description                                              | Example                                 |
@@ -43,18 +45,11 @@ Set these variables in your environment before running:
 | `PIPE_DEBUG_MAXLEN`   | Max length for debug output snippets (default: 220)      | `220`                                   |
 | `PIPE_DEBUG_HTTP`     | Print HTTP payloads (`1` for True, else False)           | `1`                                     |
 
-You can set these in your shell like so:
-```bash
-export SCALEDOWN_API_KEY="sk-xxx..."
-export SCALEDOWN_CHAT_URL="https://api.scaledown.xyz/generate"
-export PIPE_DEBUG=1
-```
-
 ### Running
 
 Run the pipeline demo:
 ```bash
-python main.py
+uv run main.py
 ```
 
 This will process the sample dataset from `dataset.py` and print results, including per-stage outputs, diffs, token usage, and final answers.
@@ -87,6 +82,7 @@ See `main.py` or `depricated_pipeline.py.old` for further details and examples.
 - `models.py` - Model adapters and wrappers (ScaleDown, etc.).
 - `dataset.py` - Example question dataset for evaluation.
 - `depricated_pipeline.py.old` - Older full-in-one script, for reference.
+- `utils.py` - Some utilities
 
 ## Extending
 

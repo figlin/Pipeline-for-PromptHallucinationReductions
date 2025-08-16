@@ -1,18 +1,12 @@
+#!/usr/bin/env python
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Callable
-import difflib
-import time
-import uuid
+from typing import Any, Dict, Optional, Protocol, Callable
 import os
 import requests
 import json
 
-from dataset import dataset  # Assuming dataset.py is in the same directory
-from main import main
-from pipeline import pipeline
-from stages import stages
-
+from dataset import Example
+from utils import ModelResponse 
 # -------------------------
 # Model adapter protocol
 # -------------------------
