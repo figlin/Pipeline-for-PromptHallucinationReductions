@@ -1,16 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Callable
-import difflib
-import time
-import uuid
-import os
-import requests
-import json
+from typing import Any, Dict, Optional, Protocol, Callable
 
-from dataset import dataset  # Assuming dataset.py is in the same directory
-from models import models
-from pipeline import pipeline
+from utils import StageResult
+
+from dataset import Example  # Assuming dataset.py is in the same directory
+from models import Model
+# from pipeline import pipeline
 
 # -------------------------
 # Gate policies (early exit)
