@@ -1,17 +1,12 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Callable
-import difflib
-import time
-import uuid
+from typing import Any, Dict, Optional, Protocol
 import os
 import requests
 import json
+import logging
 
-from dataset import dataset  # Assuming dataset.py is in the same directory
-from main import main
-from pipeline import pipeline
-from stages import stages
+from .core_types import ModelResponse
+from .dataset_loader import Example
 
 # -------------------------
 # Model adapter protocol
@@ -56,6 +51,7 @@ class ScaledownDirectModel:
         self.timeout = timeout
         self.default_params = default_params or {"temperature": 0.0}
         self.name = f"scaledown:{model}"
+        self.logger = logging.getLogger("models.scaledown")
 
     def generate(self, prompt: str, **kwargs) -> ModelResponse:
         params = {**self.default_params, **kwargs}
@@ -76,13 +72,14 @@ class ScaledownDirectModel:
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
         # right before requests.post(...) in ScaledownDirectModel.generate:
         if os.getenv("PIPE_DEBUG_HTTP", "0") != "0":
-            print("POST", self.endpoint, "payload:", json.dumps(payload)[:500])
+            self.logger.debug("http.request POST %s payload_snip=%s", self.endpoint, json.dumps(payload)[:500])
 
         r = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout)
 
         # Treat non-2xx as error
         if r.status_code >= 400:
             snip = (r.text or "")[:300].replace("\n", "\\n")
+            self.logger.error("http.error status=%s body_snip=%s", r.status_code, snip)
             raise RuntimeError(f"ScaleDown HTTP {r.status_code}; body_snip={snip}")
 
         ctype = (r.headers.get("Content-Type", "") or "").lower()
@@ -99,6 +96,7 @@ class ScaledownDirectModel:
             # Treat {"detail": ...} or {"error": ...} as failure
             if isinstance(data, dict) and ("detail" in data or "error" in data):
                 snip = json.dumps(data)[:300]
+                self.logger.error("http.error json=%s", snip)
                 raise RuntimeError(f"ScaleDown error JSON; body_snip={snip}")
 
             if isinstance(data, dict):
@@ -117,6 +115,7 @@ class ScaledownDirectModel:
         if not text:
             text = raw.strip()
         if not text:
+            self.logger.error("http.empty_text")
             raise RuntimeError("ScaleDown call returned no usable text")
 
         # Best-effort usage accounting
@@ -124,13 +123,20 @@ class ScaledownDirectModel:
         ctok = max(1, len(text)//4)
         cost = (ptok + ctok) * 1e-6
 
-        return ModelResponse(
+        resp = ModelResponse(
             text=text.strip(),
             prompt_tokens=ptok,
             completion_tokens=ctok,
             cost=cost,
             meta={"status": r.status_code}
         )
+        try:
+            self.logger.info(
+                "http.ok model=%s status=%s ptok=%s ctok=%s cost=%.6f", self.model, r.status_code, ptok, ctok, cost
+            )
+        except Exception:
+            pass
+        return resp
 
 # -------------------------
 # Scaledown Wrapper for API usage
@@ -238,35 +244,4 @@ class ScaleDownWrappedModel:
         self.name = f"scaledown({resp.meta['base_model_name']})"
         return resp
 
-# -------------------------
-# Gate policies (early exit)
-# -------------------------
-
-class GatePolicy(Protocol):
-    def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool: ...
-
-class OracleGate:  # offline eval with ground truth
-    def __init__(self, normalize: Callable[[str], str] = lambda s: s.strip().lower()):
-        self.norm = normalize
-    def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool:
-        if example.y_true is None:
-            return False
-        return self.norm(candidate_answer) == self.norm(example.y_true)
-
-class JudgeGate:   # online: ask a judge model “is this correct?”
-    def __init__(self, judge_prompt_template: str, threshold: float = 0.5):
-        self.tpl = judge_prompt_template
-        self.threshold = threshold
-    def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool:
-        if judge is None:
-            return False
-        prompt = self.tpl.format(question=example.question, answer=candidate_answer)
-        r = judge.generate(prompt, temperature=0.0)
-        txt = (r.text or "").lower()
-        p = 0.5
-        if "p=" in txt:
-            try:
-                p = float(txt.split("p=")[-1].split(">")[0])
-            except Exception:
-                p = 0.5
-        return ("pass" in txt) and (p >= self.threshold)
+# Gate policies moved to src/gates.py

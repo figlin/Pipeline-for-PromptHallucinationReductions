@@ -85,7 +85,9 @@ See `main.py` or `depricated_pipeline.py.old` for further details and examples.
 - `pipeline.py` - Pipeline runner and configuration utilities.
 - `stages.py` - Stage implementations and registry.
 - `models.py` - Model adapters and wrappers (ScaleDown, etc.).
-- `dataset.py` - Example question dataset for evaluation.
+- `dataset_loader.py` - Example question dataset for evaluation.
+- `core_types.py` - Core dataclasses used across modules.
+- `templates.py` - Default prompt templates.
 - `depricated_pipeline.py.old` - Older full-in-one script, for reference.
 
 ## Extending

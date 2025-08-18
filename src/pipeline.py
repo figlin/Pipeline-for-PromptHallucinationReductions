@@ -1,17 +1,15 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Callable
+from typing import Any, Dict, List, Optional
 import difflib
 import time
-import uuid
-import os
-import requests
-import json
+import logging
 
-from dataset import dataset  # Assuming dataset.py is in the same directory
-from main import main
-from models import models
-from stages import stages
+from .dataset_loader import Example
+from .models import Model
+from .gates import GatePolicy, OracleGate, JudgeGate
+from .stages import Stage, make_stage
+from .core_types import RunTrace
+from .templates import DEFAULT_TEMPLATES
 
 
 # -------------------------
@@ -34,10 +32,15 @@ class Pipeline:
         self.do_token_diffs = do_token_diffs
         self.debug = debug
         self.debug_maxlen = debug_maxlen
+        self.logger = logging.getLogger("pipeline")
 
     def _dbg(self, *parts):
         if self.debug:
-            print(*parts)
+            try:
+                self.logger.debug(" ".join(str(p) for p in parts))
+            except Exception:
+                # Fallback to plain print in worst case
+                print(*parts)
 
     def run_one(self, ex: Example) -> RunTrace:
         t0 = time.time()
@@ -45,7 +48,7 @@ class Pipeline:
         ctx: Dict[str, Any] = {}
         last_answer: Optional[str] = None
 
-        self._dbg(f"\n=== RUN {ex.qid} :: {ex.question!r} ===")
+        self.logger.info("run.start qid=%s question=%r", ex.qid, ex.question)
 
         for stage in self.stages:
             if last_answer is not None:
@@ -117,6 +120,7 @@ class Pipeline:
                 self._dbg(f"Stage requested early exit at {getattr(stage,'id','?')}")
                 trace.final_answer = last_answer
                 trace.early_exit_at = getattr(stage,'id','?')
+                self.logger.info("run.early_exit qid=%s at=%s final=%r", ex.qid, trace.early_exit_at, trace.final_answer)
                 break
 
             # global gate after any answer
@@ -125,12 +129,22 @@ class Pipeline:
                     self._dbg(f"Gate requested early exit after {getattr(stage,'id','?')}")
                     trace.final_answer = last_answer
                     trace.early_exit_at = f"gate_after:{getattr(stage,'id','?')}"
+                    self.logger.info("run.gate_exit qid=%s at=%s final=%r", ex.qid, trace.early_exit_at, trace.final_answer)
                     break
 
         if trace.final_answer is None:
             trace.final_answer = last_answer
         trace.timing_sec = time.time() - t0
         self._dbg(f"=== DONE in {trace.timing_sec:.3f}s :: final={trace.final_answer!r} exit={trace.early_exit_at} tokens={trace.total_tokens} ===\n")
+        self.logger.info(
+            "run.done qid=%s final=%r exit=%s tokens=%s cost=%.6f sec=%.3f",
+            ex.qid,
+            trace.final_answer,
+            trace.early_exit_at,
+            trace.total_tokens,
+            trace.total_cost,
+            trace.timing_sec,
+        )
         return trace
 
 

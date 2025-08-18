@@ -1,49 +1,15 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Callable
-import difflib
-import time
-import uuid
-import os
-import requests
-import json
+from typing import Any, Dict, Protocol
 
-from dataset import dataset  # Assuming dataset.py is in the same directory
-from models import models
-from pipeline import pipeline
+from .dataset_loader import Example  
+from .models import Model
+from .core_types import StageResult
 
 # -------------------------
 # Gate policies (early exit)
 # -------------------------
 
-class GatePolicy(Protocol):
-    def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool: ...
-
-class OracleGate:  # offline eval with ground truth
-    def __init__(self, normalize: Callable[[str], str] = lambda s: s.strip().lower()):
-        self.norm = normalize
-    def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool:
-        if example.y_true is None:
-            return False
-        return self.norm(candidate_answer) == self.norm(example.y_true)
-
-class JudgeGate:   # online: ask a judge model “is this correct?”
-    def __init__(self, judge_prompt_template: str, threshold: float = 0.5):
-        self.tpl = judge_prompt_template
-        self.threshold = threshold
-    def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool:
-        if judge is None:
-            return False
-        prompt = self.tpl.format(question=example.question, answer=candidate_answer)
-        r = judge.generate(prompt, temperature=0.0)
-        txt = (r.text or "").lower()
-        p = 0.5
-        if "p=" in txt:
-            try:
-                p = float(txt.split("p=")[-1].split(">")[0])
-            except Exception:
-                p = 0.5
-        return ("pass" in txt) and (p >= self.threshold)
+# GatePolicy provided by src/gates.py
 
 # -------------------------
 # Stage protocol + registry
