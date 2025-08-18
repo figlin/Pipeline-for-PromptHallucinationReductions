@@ -22,7 +22,6 @@ load_dotenv()
 # -------------------------
 
 if __name__ == "__main__":
-    # Logging setup
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
@@ -30,7 +29,6 @@ if __name__ == "__main__":
         handlers=[logging.StreamHandler(sys.stdout)],
     )
     logger = logging.getLogger("main")
-    # Read env
     use_echo = os.getenv("USE_ECHO", "0") not in ("0", "", "false", "False", "FALSE")
     SCALEDOWN_API_KEY = os.getenv("SCALEDOWN_API_KEY")
     SCALEDOWN_CHAT_URL = os.getenv("SCALEDOWN_CHAT_URL")  # your ScaleDown generation endpoint
@@ -79,7 +77,6 @@ if __name__ == "__main__":
 
     DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")
     pipe = build_pipeline(config, models)
-    # re-wrap with debug (or pass debug into a factory if you prefer)
     pipe.debug = DEBUG
     pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN", "220"))
 
@@ -92,4 +89,3 @@ if __name__ == "__main__":
                     trace.early_exit_at,
                     trace.total_tokens,
                     bool(trace.final_answer and trace.final_answer.strip().lower() == (ex.y_true or "").lower()))
-    # templates now live in src/templates.py

@@ -5,11 +5,6 @@ from .dataset_loader import Example
 from .models import Model
 from .core_types import StageResult
 
-# -------------------------
-# Gate policies (early exit)
-# -------------------------
-
-# GatePolicy provided by src/gates.py
 
 # -------------------------
 # Stage protocol + registry
