@@ -1,1 +1,13 @@
+# local env / venv
+.venv/
 .env
+
+# bytecode / caches
+__pycache__/
+*.pyc
+
+# run artifacts
+runs/
+
+# OS junk
+.DS_Store
