@@ -1,17 +1,14 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Callable
-import difflib
-import time
-import uuid
+from typing import Any, Dict
 import os
-import requests
-import json
+
+from dotenv import load_dotenv
 
 from dataset import dataset  # Assuming dataset.py is in the same directory
-from models import models
-from pipeline import pipeline
-from stages import stages
+from models import Model,ScaledownDirectModel
+from pipeline import DEFAULT_TEMPLATES, build_pipeline
+
+load_dotenv()
 
 # -------------------------
 # Minimal runnable demo
@@ -75,35 +72,3 @@ if __name__ == "__main__":
         print("-" * 50)
     print("Final:", trace.final_answer, "Exit at:", trace.early_exit_at, "Tokens:", trace.total_tokens)
 
-DEFAULT_TEMPLATES = {
-    "baseline": "Q: {question}\nA:",
-    "apo_rewrite": (
-        "Rewrite the user question into a concise, specific prompt that reduces ambiguity "
-        "and includes constraints to avoid hallucinations. Output only the rewritten prompt.\n\nQ: {question}"
-    ),
-    "apo_target": "Use this optimized prompt:\n\n{optimized_prompt}\n\nAnswer succinctly and cite key facts.",
-    "cove": (
-        "You are verifying an answer’s factuality via Chain-of-Verification.\n"
-        "Question: {question}\n"
-        "Prior answer: {prior_answer}\n"
-        "1) List claims.\n2) Verify each claim with independent checks.\n3) Give a corrected final answer only."
-    ),
-    "self_correct": (
-        "Revise only factual errors at temperature 0.\n"
-        "Question: {question}\n"
-        "Current answer: {prior_answer}\n"
-        "Return a corrected final answer only."
-    ),
-    "judge": (
-        "You are a strict fact-checking judge.\n"
-        "Question: {question}\n"
-        "Answer: {answer}\n"
-        "Return exactly: PASS <p=0.80> or FAIL <p=0.20>."
-    ),
-    "gate_judge": (
-        "Judge correctness for early exit.\n"
-        "Question: {question}\n"
-        "Answer: {answer}\n"
-        "Return PASS <p=...> or FAIL <p=...>."
-    )
-}
