@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Protocol, Callable
 import difflib
 import time
@@ -7,6 +7,8 @@ import uuid
 import os
 import requests
 import json
+from pathlib import Path
+from datetime import datetime
 
 from src.dataset_loader import Example, dataset
 from src.models import Model, ScaledownDirectModel, EchoModel
@@ -23,11 +25,23 @@ load_dotenv()
 
 if __name__ == "__main__":
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
+    # Prepare runs directory and file logging
+    runs_dir = Path(os.getenv("RUNS_DIR", "runs"))
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = runs_dir / f"pipeline_{run_id}.log"
+    tracefile = runs_dir / f"trace_{run_id}.jsonl"
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    file_handler = logging.FileHandler(logfile, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(getattr(logging, log_level, logging.INFO))
+    root.addHandler(console_handler)
+    root.addHandler(file_handler)
     logger = logging.getLogger("main")
     use_echo = os.getenv("USE_ECHO", "0") not in ("0", "", "false", "False", "FALSE")
     SCALEDOWN_API_KEY = os.getenv("SCALEDOWN_API_KEY")
@@ -43,35 +57,43 @@ if __name__ == "__main__":
             "target": ScaledownDirectModel(
                 api_key=SCALEDOWN_API_KEY,
                 endpoint=SCALEDOWN_CHAT_URL,
-                model=os.getenv("SD_MODEL_TARGET", "gemini/gemini-pro"),
+                model=os.getenv("SD_MODEL_TARGET", "gemini/gemini-2.0-flash"),
                 rate=float(os.getenv("SD_RATE_TARGET", "0.7")),
             ),
             "helper": ScaledownDirectModel(
                 api_key=SCALEDOWN_API_KEY,
                 endpoint=SCALEDOWN_CHAT_URL,
-                model=os.getenv("SD_MODEL_HELPER", "gemini/gemini-pro"),
+                model=os.getenv("SD_MODEL_HELPER", "gemini/gemini-2.0-flash"),
                 rate=float(os.getenv("SD_RATE_HELPER", "0.6")),
             ),
             "judge": ScaledownDirectModel(
                 api_key=SCALEDOWN_API_KEY,
                 endpoint=SCALEDOWN_CHAT_URL,
-                model=os.getenv("SD_MODEL_JUDGE", "gemini/gemini-pro"),
+                model=os.getenv("SD_MODEL_JUDGE", "gemini/gemini-2.0-flash"),
                 rate=float(os.getenv("SD_RATE_JUDGE", "0.0")),
                 default_params={"temperature": 0.0},
             ),
         }
 
+    enable_judge_stage = os.getenv("ENABLE_JUDGE_STAGE", "0") not in ("0", "", "false", "False", "FALSE")
+    enable_judge_gate = os.getenv("ENABLE_JUDGE_GATE", "0") not in ("0", "", "false", "False", "FALSE")
+
+    stages_cfg = [
+        {"type":"baseline","id":"s0","model":"target"},
+        {"type":"apo","id":"s1","helper":"helper","target":"target"},
+        {"type":"cove","id":"s2","model":"target"},
+        {"type":"self_correct","id":"s3","model":"target"},
+    ]
+    if enable_judge_stage and not use_echo:
+        stages_cfg.append({"type":"judge","id":"s4","judge":"judge","exit_on_pass": True, "threshold": 0.8})
+
+    gate_cfg = {"mode": "oracle"}
+    if enable_judge_gate and not use_echo:
+        gate_cfg = {"mode": "judge", "judge": "judge", "threshold": 0.8, "template": DEFAULT_TEMPLATES["gate_judge"]}
+
     config = {
-        "stages": [
-            {"type":"baseline","id":"s0","model":"target"},
-            {"type":"apo","id":"s1","helper":"helper","target":"target"},
-            {"type":"cove","id":"s2","model":"target"},
-            {"type":"self_correct","id":"s3","model":"target"},
-            {"type":"judge","id":"s4","judge":"judge","exit_on_pass": True, "threshold": 0.8}
-        ],
-        "gate": ({"mode": "judge", "judge": "judge", "threshold": 0.8, "template": DEFAULT_TEMPLATES["gate_judge"]}
-                 if not use_echo else
-                 {"mode": "oracle"}),
+        "stages": stages_cfg,
+        "gate": gate_cfg,
         "token_diffs": True
     }
 
@@ -80,12 +102,51 @@ if __name__ == "__main__":
     pipe.debug = DEBUG
     pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN", "220"))
 
-    
+    def _snip(s: Optional[str], n: int = 220) -> str:
+        if not s:
+            return ""
+        s = str(s)
+        return s if len(s) <= n else s[:n] + "..."
+
+    def print_pretty_trace(t):
+        print("")
+        print("=" * 80)
+        print(f"Q[{t.qid}] {t.question}")
+        print("-" * 80)
+        for r in t.stage_results:
+            print(f"[{r.stage_id}]")
+            ev = r.evidence or {}
+            for key in ("prompt", "helper_in", "optimized", "target_in", "verdict", "error"):
+                if key in ev and ev[key]:
+                    print(f"  {key}: {_snip(ev[key], pipe.debug_maxlen)}")
+            if r.answer is not None:
+                print(f"  answer: {_snip(r.answer, pipe.debug_maxlen)}")
+            mu = r.model_usage or {}
+            if isinstance(mu, dict) and ("prompt_tokens" in mu or "completion_tokens" in mu):
+                pt = mu.get("prompt_tokens"); ct = mu.get("completion_tokens")
+                model_name = mu.get("model")
+                print(f"  usage: model={model_name} ptok={pt} ctok={ct}")
+            elif isinstance(mu, dict):
+                for sub, v in mu.items():
+                    if isinstance(v, dict):
+                        pt = v.get("prompt_tokens"); ct = v.get("completion_tokens")
+                        model_name = v.get("model")
+                        if pt or ct or model_name:
+                            print(f"  usage.{sub}: model={model_name} ptok={pt} ctok={ct}")
+        print("-" * 80)
+        print(f"final: {_snip(t.final_answer, pipe.debug_maxlen)}")
+        print(f"exit_at: {t.early_exit_at}  tokens: {t.total_tokens}  cost: {t.total_cost:.6f}  time: {t.timing_sec:.3f}s")
+        print("=" * 80)
+
     for ex in dataset:
         trace = pipe.run_one(ex)
-        logger.info("result qid=%s final=%r exit=%s tokens=%s correct=%s",
-                    ex.qid,
-                    trace.final_answer,
-                    trace.early_exit_at,
-                    trace.total_tokens,
-                    bool(trace.final_answer and trace.final_answer.strip().lower() == (ex.y_true or "").lower()))
+        print_pretty_trace(trace)
+        corr = bool(trace.final_answer and trace.final_answer.strip().lower() == (ex.y_true or "").lower())
+        logger.info("result qid=%s exit=%s tokens=%s correct=%s", ex.qid, trace.early_exit_at, trace.total_tokens, corr)
+        try:
+            with open(tracefile, "a", encoding="utf-8") as f:
+                f.write(json.dumps(asdict(trace), ensure_ascii=False) + "\n")
+        except Exception:
+            logger.exception("failed.writing.trace jsonl")
+
+

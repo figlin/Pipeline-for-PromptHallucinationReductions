@@ -1,0 +1,20 @@
+2025-08-20 16:37:07,597 INFO pipeline: run.start qid=1 question='What is the capital of France?'
+2025-08-20 16:37:09,474 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=9 ctok=2 cost=0.000011
+2025-08-20 16:37:10,134 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-20 16:37:11,810 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=24 ctok=22 cost=0.000046
+2025-08-20 16:37:15,714 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=101 ctok=156 cost=0.000257
+2025-08-20 16:37:28,453 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=191 ctok=22 cost=0.000213
+2025-08-20 16:37:28,454 INFO pipeline: run.done qid=1 final='Paris, the most populous city in France and a global center for art, fashion, and culture.' exit=None tokens=527 cost=0.000527 sec=20.857
+2025-08-20 16:37:28,457 INFO main: result qid=1 exit=None tokens=527 correct=False
+2025-08-20 16:37:28,458 INFO pipeline: run.start qid=2 question="Who wrote the play 'Romeo and Juliet'?"
+2025-08-20 16:37:30,117 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=11 ctok=13 cost=0.000024
+2025-08-20 16:37:30,740 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-20 16:37:35,404 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=26 ctok=26 cost=0.000052
+2025-08-20 16:37:39,572 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=107 ctok=147 cost=0.000254
+2025-08-20 16:37:41,939 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=184 ctok=26 cost=0.000210
+2025-08-20 16:37:41,939 INFO pipeline: run.done qid=2 final="William Shakespeare, the renowned English playwright and poet, wrote the tragic play 'Romeo and Juliet'." exit=None tokens=540 cost=0.000540 sec=13.481
+2025-08-20 16:37:41,941 INFO main: result qid=2 exit=None tokens=540 correct=False
+2025-08-20 16:37:41,941 INFO pipeline: run.start qid=3 question='What is the tallest mountain in the world above sea level?'
+2025-08-20 16:37:43,925 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=16 ctok=17 cost=0.000033
+2025-08-20 16:37:44,582 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-20 16:37:48,634 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=31 ctok=30 cost=0.000061

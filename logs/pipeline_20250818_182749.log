@@ -1,0 +1,17 @@
+2025-08-18 18:27:49,481 INFO pipeline: run.start qid=1 question='What is the capital of France?'
+2025-08-18 18:27:51,027 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=9 ctok=1 cost=0.000010
+2025-08-18 18:27:51,028 INFO pipeline: run.gate_exit qid=1 at=gate_after:s0 final='Paris'
+2025-08-18 18:27:51,029 INFO pipeline: run.done qid=1 final='Paris' exit=gate_after:s0 tokens=10 cost=0.000010 sec=1.549
+2025-08-18 18:27:51,032 INFO main: result qid=1 exit=gate_after:s0 tokens=10 correct=True
+2025-08-18 18:27:51,033 INFO pipeline: run.start qid=2 question="Who wrote the play 'Romeo and Juliet'?"
+2025-08-18 18:27:52,558 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=11 ctok=5 cost=0.000016
+2025-08-18 18:27:53,174 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-18 18:27:57,327 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=26 ctok=56 cost=0.000082
+2025-08-18 18:28:06,062 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=114 ctok=497 cost=0.000611
+2025-08-18 18:28:12,998 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=534 ctok=55 cost=0.000589
+2025-08-18 18:28:12,998 INFO pipeline: run.done qid=2 final="William Shakespeare, an English playwright, poet, and actor, wrote the tragic play 'Romeo and Juliet' around 1597. He is widely regarded as the greatest writer in the English language and the world's pre-eminent dramatist." exit=None tokens=1298 cost=0.001298 sec=21.964
+2025-08-18 18:28:13,000 INFO main: result qid=2 exit=None tokens=1298 correct=False
+2025-08-18 18:28:13,010 INFO pipeline: run.start qid=3 question='What is the tallest mountain in the world above sea level?'
+2025-08-18 18:28:16,456 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=16 ctok=37 cost=0.000053
+2025-08-18 18:28:17,130 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-18 18:28:20,941 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=31 ctok=19 cost=0.000050

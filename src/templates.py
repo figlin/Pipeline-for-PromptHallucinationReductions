@@ -5,12 +5,23 @@ DEFAULT_TEMPLATES = {
         "and includes constraints to avoid hallucinations. Output only the rewritten prompt.\n\nQ: {question}"
     ),
     "apo_target": "Use this optimized prompt:\n\n{optimized_prompt}\n\nAnswer succinctly and cite key facts.",
-    "cove": (
-        "You are verifying an answer’s factuality via Chain-of-Verification.\n"
-        "Question: {question}\n"
-        "Prior answer: {prior_answer}\n"
-        "1) List claims.\n2) Verify each claim with independent checks.\n3) Give a corrected final answer only."
-    ),
+   "cove": (
+    "Fact-checking mode.\n"
+    "Q: {question}\n"
+    "Draft: {prior_answer}\n\n"
+    "Steps:\n"
+    "1. Extract factual claims clearly.\n"
+    "2. Check each claim independently for accuracy.\n"
+    "3. Produce a corrected final answer.\n\n"
+    "Output JSON:\n"
+    "{{\n"
+    "  \"claims\": [\n"
+    "    {{\"text\": \"...\", \"verdict\": \"supported|unsupported|uncertain\"}}\n"
+    "  ],\n"
+    "  \"final_answer\": \"...\"\n"
+    "}}"
+),
+
     "self_correct": (
         "Revise only factual errors at temperature 0.\n"
         "Question: {question}\n"

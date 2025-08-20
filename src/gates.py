@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Protocol, Optional, Callable
+import logging
 
 from .dataset_loader import Example
 from .models import Model
@@ -23,12 +24,20 @@ class JudgeGate:
 	def __init__(self, judge_prompt_template: str, threshold: float = 0.5):
 		self.tpl = judge_prompt_template
 		self.threshold = threshold
+		self.logger = logging.getLogger("gates.judge")
 
 	def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool:
 		if judge is None:
 			return False
 		prompt = self.tpl.format(question=example.question, answer=candidate_answer)
-		r = judge.generate(prompt, temperature=0.0)
+		try:
+			r = judge.generate(prompt, temperature=0.0)
+		except Exception as e:
+			try:
+				self.logger.error("judge.call_failed error=%s", e)
+			except Exception:
+				pass
+			return False
 		txt = (r.text or "").lower()
 		p = 0.5
 		if "p=" in txt:

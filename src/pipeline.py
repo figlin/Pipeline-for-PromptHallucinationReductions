@@ -23,8 +23,8 @@ class Pipeline:
         gate: GatePolicy,
         judge_for_gate: Optional[Model] = None,
         do_token_diffs: bool = True,
-        debug: bool = False,            # <-- new
-        debug_maxlen: int = 220         # <-- new
+        debug: bool = False,            
+        debug_maxlen: int = 220         
     ):
         self.stages = stages
         self.gate = gate
@@ -39,7 +39,6 @@ class Pipeline:
             try:
                 self.logger.debug(" ".join(str(p) for p in parts))
             except Exception:
-                # Fallback to plain print in worst case
                 print(*parts)
 
     def run_one(self, ex: Example) -> RunTrace:
@@ -73,8 +72,6 @@ class Pipeline:
                     if k in ev:
                         self._dbg(f"ERROR ({k}):", ev[k])
 
-            # usage accounting helper
-            # inside Pipeline.run_one()
 
             def add_usage(u: Dict[str, Any]):
                 if not isinstance(u, dict):
@@ -94,11 +91,9 @@ class Pipeline:
             # …
 
             if "prompt_tokens" in res.model_usage:
-                # flat usage dict (BaselineAsk etc.)
                 add_usage(res.model_usage)
                 dbg_usage(res.model_usage)
             else:
-                # nested usage dicts (APO helper/target)
                 for sub_label, sub in res.model_usage.items():
                     add_usage(sub)
                     dbg_usage(sub, label=f"usage.{sub_label}")
@@ -115,7 +110,6 @@ class Pipeline:
             else:
                 self._dbg("Answer: <None>")
 
-            # stage-triggered exit?
             if res.should_exit:
                 self._dbg(f"Stage requested early exit at {getattr(stage,'id','?')}")
                 trace.final_answer = last_answer
@@ -123,7 +117,6 @@ class Pipeline:
                 self.logger.info("run.early_exit qid=%s at=%s final=%r", ex.qid, trace.early_exit_at, trace.final_answer)
                 break
 
-            # global gate after any answer
             if last_answer:
                 if self.gate.should_exit(ex, last_answer, self.judge_for_gate):
                     self._dbg(f"Gate requested early exit after {getattr(stage,'id','?')}")

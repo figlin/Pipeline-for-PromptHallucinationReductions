@@ -38,8 +38,8 @@ class ScaledownDirectModel:
     def __init__(
         self,
         api_key: str,
-        endpoint: str,                  # e.g., https://api.scaledown.xyz/<your-generate-endpoint>
-        model: str = "gemini/gemini-pro",
+        endpoint: str,                  
+        model: str = "gemini/gemini-2.0-flash",
         rate: float = 0.7,
         timeout: float = 30.0,
         default_params: Optional[Dict[str, Any]] = None,
@@ -101,14 +101,21 @@ class ScaledownDirectModel:
 
             if isinstance(data, dict):
                 text = (
-                    data.get("output")
+                    data.get("full_response")
+                    or data.get("compressed_response")
+                    # Generic fields
+                    or data.get("output")
                     or data.get("text")
                     or data.get("response")
                     or data.get("output_text")
-                    or (data.get("choices",[{}])[0].get("text","")
-                        if isinstance(data.get("choices"), list) else "")
-                    or (data.get("choices",[{}])[0].get("message",{}).get("content","")
-                        if isinstance(data.get("choices"), list) else "")
+                    or (
+                        data.get("choices", [{}])[0].get("text", "")
+                        if isinstance(data.get("choices"), list) else ""
+                    )
+                    or (
+                        data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if isinstance(data.get("choices"), list) else ""
+                    )
                     or ""
                 )
 
@@ -155,7 +162,7 @@ class ScaleDownWrappedModel:
         api_key: str,
         rate: float = 0.7,
         sd_model: str = "gemini/gemini-pro",
-        endpoint: str = "https://api.scaledown.xyz/compress/raw",
+        endpoint: str = "https://api.scaledown.xyz/compress/",
         only_on_min_chars: int = 0,         # set >0 to skip compression for short prompts
         timeout_sec: float = 15.0
     ):
@@ -244,4 +251,3 @@ class ScaleDownWrappedModel:
         self.name = f"scaledown({resp.meta['base_model_name']})"
         return resp
 
-# Gate policies moved to src/gates.py
