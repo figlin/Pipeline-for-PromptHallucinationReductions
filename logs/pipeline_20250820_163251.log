@@ -1,2 +1,0 @@
-2025-08-20 16:32:51,396 INFO pipeline: run.start qid=1 question='What is the capital of France?'
-2025-08-20 16:32:53,026 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=9 ctok=2 cost=0.000011
