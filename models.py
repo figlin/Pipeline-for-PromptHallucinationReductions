@@ -4,8 +4,8 @@ from typing import Any, Dict, Optional, Protocol, Callable
 import os
 import requests
 import json
+from dataclasses import dataclass
 
-from dataset import Example
 from utils import ModelResponse 
 # -------------------------
 # Model adapter protocol
@@ -72,7 +72,7 @@ class ScaledownDirectModel:
         if os.getenv("PIPE_DEBUG_HTTP", "0") != "0":
             print("POST", self.endpoint, "payload:", json.dumps(payload)[:500])
 
-        r = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout)
+        r = requests.post(self.endpoint, headers=headers, data=json.dumps(payload), timeout=self.timeout)
 
         # Treat non-2xx as error
         if r.status_code >= 400:
@@ -231,6 +231,62 @@ class ScaleDownWrappedModel:
         resp.meta["base_model_name"] = getattr(self.base, "name", "unknown")
         self.name = f"scaledown({resp.meta['base_model_name']})"
         return resp
+
+# -------------------------
+# Ollama local model (for local LLM testing)
+# -------------------------
+
+class OllamaModel:
+    """
+    Adapter for local Ollama models.
+    See https://github.com/ollama/ollama/blob/main/docs/api.md
+    """
+    def __init__(
+        self,
+        model: str,
+        endpoint: str = "http://localhost:11434/api/generate",
+        timeout: float = 60.0,
+        default_params: Optional[Dict[str, Any]] = None,
+    ):
+        self.model = model
+        self.name = f"ollama:{model}"
+        self.endpoint = endpoint
+        self.timeout = timeout
+        self.default_params = default_params or {}
+
+    def generate(self, prompt: str, **kwargs) -> ModelResponse:
+        params = {**self.default_params, **kwargs}
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": params,
+        }
+
+        headers = {"Content-Type": "application/json"}
+        r = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout)
+
+        if r.status_code >= 400:
+            snip = (r.text or "")[:300].replace("\n", "\\n")
+            raise RuntimeError(f"Ollama HTTP {r.status_code}; body_snip={snip}")
+
+        try:
+            data = r.json()
+        except json.JSONDecodeError:
+            raise RuntimeError(f"Ollama returned invalid JSON: {r.text}")
+
+        text = data.get("response", "")
+        if not text:
+            raise RuntimeError("Ollama call returned no usable text")
+
+        return ModelResponse(
+            text=text.strip(),
+            prompt_tokens=data.get("prompt_eval_count", 0),
+            completion_tokens=data.get("eval_count", 0),
+            cost=0.0,  # Local model, no cost
+            meta={"status": r.status_code}
+        )
+        
 
 # -------------------------
 # Gate policies (early exit)

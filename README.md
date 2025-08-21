@@ -16,17 +16,22 @@ This repository implements a modular pipeline for reducing prompt hallucinations
 ### Requirements
 
 - Python 3.8+
-- `requests`
+- `uv` or `pip`
 - Access to [ScaleDown](https://scaledown.xyz/) API (or compatible endpoint).
+- A local [Ollama](https://ollama.com/) installation (for running local models).
 
 Install dependencies:
 ```bash
-pip install requests
+# Using uv
+uv pip install -r requirements.txt
+
+# Or using pip
+pip install requests python-dotenv
 ```
 
 ### Environment Variables
 
-Create an .env by copying the contents of the .env.example
+Create a file named `.env` in the root directory by copying the contents of `.env.example`, then fill in the required values.
 
 Set these variables in your environment before running:
 
@@ -44,15 +49,22 @@ Set these variables in your environment before running:
 | `PIPE_DEBUG`          | Enable debug output (`1` for True, else False)           | `1`                                     |
 | `PIPE_DEBUG_MAXLEN`   | Max length for debug output snippets (default: 220)      | `220`                                   |
 | `PIPE_DEBUG_HTTP`     | Print HTTP payloads (`1` for True, else False)           | `1`                                     |
+| `DATASET_PATH`        | Path to a CSV dataset, or "internal" for the default.    | `data/simple_qa_test_set.csv`           |
 
 ### Running
 
+Ensure your `.env` file is correctly configured. To run with a CSV file, set `DATASET_PATH` in your `.env` file.
+
 Run the pipeline demo:
 ```bash
+# Using uv
 uv run main.py
+
+# Or using standard python
+python main.py
 ```
 
-This will process the sample dataset from `dataset.py` and print results, including per-stage outputs, diffs, token usage, and final answers.
+This will process the dataset specified by `DATASET_PATH` and print results, including per-stage outputs, diffs, token usage, and final answers.
 
 ### Custom Configuration
 

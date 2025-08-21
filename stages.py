@@ -2,9 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Protocol, Callable
 
-from utils import StageResult
+from utils import StageResult, Example
 
-from dataset import Example  # Assuming dataset.py is in the same directory
 from models import Model
 # from pipeline import pipeline
 
@@ -199,3 +198,4 @@ class ExternalJudgeStage:
                 evidence=evidence,
                 model_usage={"model": getattr(self.judge, "name", "unknown")}
             )
+            
