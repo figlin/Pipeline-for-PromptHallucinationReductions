@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Protocol, Optional, Callable
 import logging
 
-from .dataset_loader import Example
-from .models import Model
+from src.core.dataset_loader import Example
+from src.core.models import Model
 
 
 class GatePolicy(Protocol):

@@ -1,0 +1,23 @@
+2025-08-23 22:09:57,725 WARNING usage_tracker: Failed to initialize database: You can only execute one statement at a time.
+2025-08-23 22:09:57,726 INFO main: Initialized usage tracker with budget: $10.00
+2025-08-23 22:09:57,726 INFO main: Starting pipeline run...
+2025-08-23 22:09:57,726 INFO pipeline: run.start qid=1 question='What is the capital of France?'
+2025-08-23 22:09:58,621 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:09:58,623 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-23 22:09:59,299 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:09:59,965 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:09:59,966 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-23 22:10:00,628 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:10:00,629 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-23 22:10:01,284 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:10:01,284 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-23 22:10:01,284 INFO pipeline: run.done qid=1 final=None exit=None tokens=0 cost=0.000000 sec=3.559
+2025-08-23 22:10:01,286 INFO main: result qid=1 exit=None tokens=0 correct=False confidence=0.000
+2025-08-23 22:10:01,287 INFO pipeline: run.start qid=2 question="Who wrote the play 'Romeo and Juliet'?"
+2025-08-23 22:10:01,921 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:10:01,921 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-23 22:10:02,566 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:10:03,217 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:10:03,217 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-23 22:10:03,885 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:10:03,886 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost

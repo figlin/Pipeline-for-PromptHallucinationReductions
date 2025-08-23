@@ -1,0 +1,28 @@
+2025-08-23 22:12:31,985 WARNING usage_tracker: Failed to initialize database: You can only execute one statement at a time.
+2025-08-23 22:12:31,985 INFO main: Initialized usage tracker with budget: $10.00
+2025-08-23 22:12:31,986 INFO main: Starting pipeline run...
+2025-08-23 22:12:31,986 INFO pipeline: run.start qid=1 question='What is the capital of France?'
+2025-08-23 22:12:32,662 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:32,664 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-23 22:12:33,332 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:33,996 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:33,997 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-23 22:12:34,664 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:34,665 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-23 22:12:35,294 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:35,295 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-23 22:12:35,295 INFO pipeline: run.done qid=1 final=None exit=None tokens=0 cost=0.000000 sec=3.309
+2025-08-23 22:12:35,296 INFO main: result qid=1 exit=None tokens=0 correct=False confidence=0.000
+2025-08-23 22:12:35,297 INFO pipeline: run.start qid=2 question="Who wrote the play 'Romeo and Juliet'?"
+2025-08-23 22:12:35,923 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:35,924 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-23 22:12:36,588 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:37,236 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:37,237 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-23 22:12:37,910 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:37,911 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-23 22:12:38,572 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-23 22:12:38,573 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-23 22:12:38,573 INFO pipeline: run.done qid=2 final=None exit=None tokens=0 cost=0.000000 sec=3.276
+2025-08-23 22:12:38,575 INFO main: result qid=2 exit=None tokens=0 correct=False confidence=0.000
+2025-08-23 22:12:38,575 INFO pipeline: run.start qid=3 question='What is the tallest mountain in the world above sea level?'

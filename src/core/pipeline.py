@@ -4,12 +4,13 @@ import difflib
 import time
 import logging
 
-from .dataset_loader import Example
-from .models import Model
-from .gates import GatePolicy, OracleGate, JudgeGate
-from .stages import Stage, make_stage
-from .core_types import RunTrace
-from .templates import DEFAULT_TEMPLATES
+from src.core.dataset_loader import Example
+from src.core.models import Model
+from src.core.gates import GatePolicy, OracleGate, JudgeGate
+from src.core.stages import Stage, make_stage
+from src.core.core_types import RunTrace
+from src.core.templates import DEFAULT_TEMPLATES
+from src.analytics.tracking import UsageTracker
 
 
 # -------------------------
@@ -24,7 +25,9 @@ class Pipeline:
         judge_for_gate: Optional[Model] = None,
         do_token_diffs: bool = True,
         debug: bool = False,            
-        debug_maxlen: int = 220         
+        debug_maxlen: int = 220,
+        usage_tracker: Optional[UsageTracker] = None,
+        max_budget_usd: Optional[float] = None
     ):
         self.stages = stages
         self.gate = gate
@@ -32,6 +35,8 @@ class Pipeline:
         self.do_token_diffs = do_token_diffs
         self.debug = debug
         self.debug_maxlen = debug_maxlen
+        self.usage_tracker = usage_tracker
+        self.max_budget_usd = max_budget_usd
         self.logger = logging.getLogger("pipeline")
 
     def _dbg(self, *parts):
@@ -55,8 +60,20 @@ class Pipeline:
 
             self._dbg(f"\n-- Stage {getattr(stage,'id','?')} ({stage.__class__.__name__}) --")
 
+            # Check budget before running stage
+            if self.usage_tracker and self.max_budget_usd:
+                # Estimate cost for this stage (rough estimate)
+                estimated_cost = 0.01  # Conservative estimate
+                if not self.usage_tracker.check_budget(estimated_cost):
+                    self.logger.warning(f"Budget exceeded, stopping pipeline for example {ex.qid}")
+                    break
+
             res = stage.run(ex, ctx)
             trace.stage_results.append(res)
+            
+            # Track usage after stage completes
+            if self.usage_tracker:
+                self.usage_tracker.log_stage_usage(ex.qid, res)
 
             # Debug: show prompt/evidence/errors
             ev = res.evidence or {}
@@ -144,6 +161,7 @@ class Pipeline:
 def build_pipeline(
     config: Dict[str, Any],
     models: Dict[str, Model],
+    usage_tracker: Optional[UsageTracker] = None,
 ) -> Pipeline:
     # Gate
     gate_cfg = config.get("gate", {"mode": "none"})
@@ -167,7 +185,8 @@ def build_pipeline(
             stages.append(make_stage("baseline",
                 id=sid,
                 model=models[s["model"]],
-                prompt_template=s.get("template", DEFAULT_TEMPLATES["baseline"])
+                prompt_template=s.get("template", DEFAULT_TEMPLATES["baseline"]),
+                exit_confidence=s.get("exit_confidence")
             ))
         elif t == "apo":
             stages.append(make_stage("apo",
@@ -175,19 +194,22 @@ def build_pipeline(
                 helper=models[s["helper"]],
                 target=models[s["target"]],
                 rewrite_template=s.get("rewrite_template", DEFAULT_TEMPLATES["apo_rewrite"]),
-                target_prompt_template=s.get("target_template", DEFAULT_TEMPLATES["apo_target"])
+                target_prompt_template=s.get("target_template", DEFAULT_TEMPLATES["apo_target"]),
+                exit_confidence=s.get("exit_confidence")
             ))
         elif t == "cove":
             stages.append(make_stage("cove",
                 id=sid,
                 model=models[s["model"]],
-                cove_template=s.get("template", DEFAULT_TEMPLATES["cove"])
+                cove_template=s.get("template", DEFAULT_TEMPLATES["cove"]),
+                exit_confidence=s.get("exit_confidence")
             ))
         elif t == "self_correct":
             stages.append(make_stage("self_correct",
                 id=sid,
                 model=models[s["model"]],
-                template=s.get("template", DEFAULT_TEMPLATES["self_correct"])
+                template=s.get("template", DEFAULT_TEMPLATES["self_correct"]),
+                exit_confidence=s.get("exit_confidence")
             ))
         elif t == "judge":
             stages.append(make_stage("judge",
@@ -205,5 +227,7 @@ def build_pipeline(
         stages=stages,
         gate=gate,
         judge_for_gate=gate_judge,
-        do_token_diffs=bool(config.get("token_diffs", True))
+        do_token_diffs=bool(config.get("token_diffs", True)),
+        usage_tracker=usage_tracker,
+        max_budget_usd=config.get("max_budget_usd")
     )

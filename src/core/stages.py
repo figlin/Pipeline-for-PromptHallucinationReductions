@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, Protocol, Callable
 
-from .dataset_loader import Example  
-from .models import Model
-from .core_types import StageResult
+from src.core.dataset_loader import Example  
+from src.core.models import Model
+from src.core.core_types import StageResult
 
 
 # -------------------------
@@ -33,33 +33,64 @@ def make_stage(name: str, **kwargs) -> Stage:
 
 @register_stage("baseline")
 class BaselineAsk:
-    def __init__(self, id: str, model: Model, prompt_template: str):
+    def __init__(self, id: str, model: Model, prompt_template: str, 
+                 exit_confidence: Optional[float] = None):
         self.id, self.model, self.tpl = id, model, prompt_template
+        self.exit_confidence = exit_confidence
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
         prompt = self.tpl.format(question=ex.question)
         try:
             r = self.model.generate(prompt, temperature=0.0)
             ans = (r.text or "").strip() or None
+            
+            # Calculate confidence (simple heuristic based on answer length and content)
+            confidence = self._calculate_confidence(ans) if ans else 0.0
+            should_exit = self.exit_confidence and confidence >= self.exit_confidence
+            
             return StageResult(
-                stage_id=self.id, answer=ans, should_exit=False,
+                stage_id=self.id, answer=ans, should_exit=should_exit, confidence=confidence,
                 evidence={"prompt": prompt},
                 model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__}
             )
         except Exception as e:
             return StageResult(
-                stage_id=self.id, answer=None, should_exit=False,
+                stage_id=self.id, answer=None, should_exit=False, confidence=0.0,
                 evidence={"prompt": prompt, "error": str(e)},
                 model_usage={"model": getattr(self.model, "name", "unknown")}
             )
+    
+    def _calculate_confidence(self, answer: str) -> float:
+        """Calculate confidence score based on answer characteristics"""
+        if not answer:
+            return 0.0
+        
+        # Simple heuristics - can be enhanced with more sophisticated methods
+        confidence = 0.5  # Base confidence
+        
+        # Length-based confidence
+        if len(answer) > 50:
+            confidence += 0.2
+        elif len(answer) > 20:
+            confidence += 0.1
+        
+        # Content-based confidence
+        if any(word in answer.lower() for word in ["because", "therefore", "thus", "hence"]):
+            confidence += 0.1
+        if answer.count(".") > 1:  # Multiple sentences
+            confidence += 0.1
+        
+        return min(confidence, 1.0)
 
 @register_stage("apo")
 class APOStage:
     """Uses a lightweight helper LLM to rewrite the prompt before calling the target model."""
     def __init__(self, id: str, helper: Model, target: Model,
-                 rewrite_template: str, target_prompt_template: str):
+                 rewrite_template: str, target_prompt_template: str,
+                 exit_confidence: Optional[float] = None):
         self.id, self.helper, self.target = id, helper, target
         self.rewrite_template = rewrite_template
         self.target_prompt_template = target_prompt_template
+        self.exit_confidence = exit_confidence
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
         evidence: Dict[str, Any] = {}
         usage: Dict[str, Any] = {}
@@ -82,45 +113,128 @@ class APOStage:
         try:
             t = self.target.generate(target_in, temperature=0.0)
             ans = (t.text or "").strip() or None
+            
+            # Calculate confidence
+            confidence = self._calculate_confidence(ans) if ans else 0.0
+            should_exit = self.exit_confidence and confidence >= self.exit_confidence
+            
             usage["target"] = {"model": getattr(self.target, "name", "unknown"), **t.__dict__}
-            return StageResult(self.id, ans, False, evidence=evidence, model_usage=usage)
+            return StageResult(self.id, ans, should_exit, confidence, evidence=evidence, model_usage=usage)
         except Exception as e:
             evidence["target_error"] = str(e)
-            return StageResult(self.id, None, False, evidence=evidence,
+            return StageResult(self.id, None, False, 0.0, evidence=evidence,
                                model_usage=usage if usage else {"model": getattr(self.target, "name", "unknown")})
+    
+    def _calculate_confidence(self, answer: str) -> float:
+        """Calculate confidence score based on answer characteristics"""
+        if not answer:
+            return 0.0
+        
+        # Simple heuristics - can be enhanced with more sophisticated methods
+        confidence = 0.5  # Base confidence
+        
+        # Length-based confidence
+        if len(answer) > 50:
+            confidence += 0.2
+        elif len(answer) > 20:
+            confidence += 0.1
+        
+        # Content-based confidence
+        if any(word in answer.lower() for word in ["because", "therefore", "thus", "hence"]):
+            confidence += 0.1
+        if answer.count(".") > 1:  # Multiple sentences
+            confidence += 0.1
+        
+        return min(confidence, 1.0)
 
 @register_stage("cove")
 class CoVeStage:
     """Standardized Chain-of-Verification prompt around a candidate answer (or the question if none)."""
-    def __init__(self, id: str, model: Model, cove_template: str):
+    def __init__(self, id: str, model: Model, cove_template: str, exit_confidence: Optional[float] = None):
         self.id, self.model, self.tpl = id, model, cove_template
+        self.exit_confidence = exit_confidence
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
         prev_ans = ctx.get("last_answer", "")
         prompt = self.tpl.format(question=ex.question, prior_answer=prev_ans)
         try:
             r = self.model.generate(prompt, temperature=0.0)
             ans = (r.text or "").strip() or None
-            return StageResult(self.id, ans, False, evidence={"prompt": prompt},
+            
+            # Calculate confidence
+            confidence = self._calculate_confidence(ans) if ans else 0.0
+            should_exit = self.exit_confidence and confidence >= self.exit_confidence
+            
+            return StageResult(self.id, ans, should_exit, confidence, evidence={"prompt": prompt},
                                model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__})
         except Exception as e:
-            return StageResult(self.id, None, False, evidence={"prompt": prompt, "error": str(e)},
+            return StageResult(self.id, None, False, 0.0, evidence={"prompt": prompt, "error": str(e)},
                                model_usage={"model": getattr(self.model, "name", "unknown")})
+    
+    def _calculate_confidence(self, answer: str) -> float:
+        """Calculate confidence score based on answer characteristics"""
+        if not answer:
+            return 0.0
+        
+        # Simple heuristics - can be enhanced with more sophisticated methods
+        confidence = 0.5  # Base confidence
+        
+        # Length-based confidence
+        if len(answer) > 50:
+            confidence += 0.2
+        elif len(answer) > 20:
+            confidence += 0.1
+        
+        # Content-based confidence
+        if any(word in answer.lower() for word in ["because", "therefore", "thus", "hence"]):
+            confidence += 0.1
+        if answer.count(".") > 1:  # Multiple sentences
+            confidence += 0.1
+        
+        return min(confidence, 1.0)
 
 @register_stage("self_correct")
 class SelfCorrectStage:
-    def __init__(self, id: str, model: Model, template: str):
+    def __init__(self, id: str, model: Model, template: str, exit_confidence: Optional[float] = None):
         self.id, self.model, self.tpl = id, model, template
+        self.exit_confidence = exit_confidence
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
         prev_ans = ctx.get("last_answer", "")
         prompt = self.tpl.format(question=ex.question, prior_answer=prev_ans)
         try:
             r = self.model.generate(prompt, temperature=0.0)
             ans = (r.text or "").strip() or None
-            return StageResult(self.id, ans, False, evidence={"prompt": prompt},
+            
+            # Calculate confidence
+            confidence = self._calculate_confidence(ans) if ans else 0.0
+            should_exit = self.exit_confidence and confidence >= self.exit_confidence
+            
+            return StageResult(self.id, ans, should_exit, confidence, evidence={"prompt": prompt},
                                model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__})
         except Exception as e:
-            return StageResult(self.id, None, False, evidence={"prompt": prompt, "error": str(e)},
+            return StageResult(self.id, None, False, 0.0, evidence={"prompt": prompt, "error": str(e)},
                                model_usage={"model": getattr(self.model, "name", "unknown")})
+    
+    def _calculate_confidence(self, answer: str) -> float:
+        """Calculate confidence score based on answer characteristics"""
+        if not answer:
+            return 0.0
+        
+        # Simple heuristics - can be enhanced with more sophisticated methods
+        confidence = 0.5  # Base confidence
+        
+        # Length-based confidence
+        if len(answer) > 50:
+            confidence += 0.2
+        elif len(answer) > 20:
+            confidence += 0.1
+        
+        # Content-based confidence
+        if any(word in answer.lower() for word in ["because", "therefore", "thus", "hence"]):
+            confidence += 0.1
+        if answer.count(".") > 1:  # Multiple sentences
+            confidence += 0.1
+        
+        return min(confidence, 1.0)
 
 @register_stage("judge")
 class ExternalJudgeStage:
@@ -152,6 +266,7 @@ class ExternalJudgeStage:
                 stage_id=self.id,
                 answer=cand or None,
                 should_exit=exit_flag,
+                confidence=p,  # Use judge probability as confidence
                 evidence=evidence,
                 model_usage={"model": getattr(self.judge, "name", "unknown"), **r.__dict__}
             )
@@ -161,6 +276,7 @@ class ExternalJudgeStage:
                 stage_id=self.id,
                 answer=cand or None,
                 should_exit=False,
+                confidence=0.0,
                 evidence=evidence,
                 model_usage={"model": getattr(self.judge, "name", "unknown")}
             )

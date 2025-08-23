@@ -5,8 +5,8 @@ import requests
 import json
 import logging
 
-from .core_types import ModelResponse
-from .dataset_loader import Example
+from src.core.core_types import ModelResponse
+from src.core.dataset_loader import Example
 
 # -------------------------
 # Model adapter protocol

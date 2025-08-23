@@ -17,6 +17,7 @@ class StageResult:
     stage_id: str
     answer: Optional[str]
     should_exit: bool
+    confidence: float = 0.0  # Confidence score (0-1)
     evidence: Dict[str, Any] = field(default_factory=dict)
     model_usage: Dict[str, Any] = field(default_factory=dict)
 
