@@ -6,7 +6,7 @@ import logging
 
 from src.core.dataset_loader import Example
 from src.core.models import Model
-from src.core.gates import GatePolicy, OracleGate, JudgeGate
+from src.core.gates import GatePolicy, OracleGate, JudgeGate, NoExitGate
 from src.core.stages import Stage, make_stage
 from src.core.core_types import RunTrace
 from src.core.templates import DEFAULT_TEMPLATES
@@ -49,6 +49,8 @@ class Pipeline:
     def run_one(self, ex: Example) -> RunTrace:
         t0 = time.time()
         trace = RunTrace(qid=ex.qid, question=ex.question)
+        # Add expected answer for display purposes
+        trace.y_true = getattr(ex, 'y_true', None)
         ctx: Dict[str, Any] = {}
         last_answer: Optional[str] = None
 
@@ -173,7 +175,7 @@ def build_pipeline(
         gate = JudgeGate(judge_prompt_template=jt, threshold=float(gate_cfg.get("threshold", 0.5)))
         gate_judge = models[gate_cfg["judge"]]
     else:
-        gate = OracleGate(lambda s: "__NO_EARLY_EXIT__")  # always false
+        gate = NoExitGate()  # never exit early
         gate_judge = None
 
     # Stages

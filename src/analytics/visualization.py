@@ -9,7 +9,7 @@ import json
 import sqlite3
 from datetime import datetime
 
-from .analysis import PipelineAnalyzer, StageAnalysis
+from src.analytics.analysis import PipelineAnalyzer, StageAnalysis
 from src.core.core_types import RunTrace
 
 
@@ -360,7 +360,37 @@ def create_visualization_report(trace_file: str, db_path: str = "usage_tracking.
             for line in f:
                 if line.strip():
                     trace_data = json.loads(line)
-                    traces.append(trace_data)
+                    # Convert dict back to RunTrace object
+                    from src.core.core_types import RunTrace, StageResult
+                    from dataclasses import field
+                    
+                    # Convert stage_results back to StageResult objects
+                    stage_results = []
+                    for stage_data in trace_data.get('stage_results', []):
+                        stage_result = StageResult(
+                            stage_id=stage_data.get('stage_id'),
+                            answer=stage_data.get('answer'),
+                            confidence=stage_data.get('confidence', 0.0),
+                            evidence=stage_data.get('evidence'),
+                            model_usage=stage_data.get('model_usage', {}),
+                            should_exit=stage_data.get('should_exit', False)
+                        )
+                        stage_results.append(stage_result)
+                    
+                    # Create RunTrace object
+                    trace = RunTrace(
+                        qid=trace_data.get('qid'),
+                        question=trace_data.get('question'),
+                        stage_results=stage_results,
+                        final_answer=trace_data.get('final_answer'),
+                        early_exit_at=trace_data.get('early_exit_at'),
+                        total_tokens=trace_data.get('total_tokens', 0),
+                        total_cost=trace_data.get('total_cost', 0.0),
+                        timing_sec=trace_data.get('timing_sec', 0.0),
+                        artifacts=trace_data.get('artifacts', {}),
+                        y_true=trace_data.get('y_true')
+                    )
+                    traces.append(trace)
     except Exception as e:
         print(f"Failed to load trace file: {e}")
         return {}

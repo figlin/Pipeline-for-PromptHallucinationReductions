@@ -1,0 +1,44 @@
+{
+  "stage_analysis": {
+    "s0": "StageAnalysis(stage_id='s0', total_examples=8, total_tokens=182, total_cost_usd=0.00018199999999999998, avg_confidence=0.5, early_exit_rate=0.0, marginal_accuracy_gain=0.0, cost_per_accuracy_point=0.0, efficiency_score=0.0)",
+    "s1": "StageAnalysis(stage_id='s1', total_examples=8, total_tokens=167, total_cost_usd=0.000167, avg_confidence=0.5, early_exit_rate=0.0, marginal_accuracy_gain=0.0, cost_per_accuracy_point=0.0, efficiency_score=0.0)",
+    "s2": "StageAnalysis(stage_id='s2', total_examples=8, total_tokens=382, total_cost_usd=0.00038199999999999996, avg_confidence=0.5, early_exit_rate=0.0, marginal_accuracy_gain=0.0, cost_per_accuracy_point=0.0, efficiency_score=0.0)",
+    "s3": "StageAnalysis(stage_id='s3', total_examples=8, total_tokens=350, total_cost_usd=0.00035, avg_confidence=0.5, early_exit_rate=0.0, marginal_accuracy_gain=0.0, cost_per_accuracy_point=0.0, efficiency_score=0.0)"
+  },
+  "early_exit_analysis": {
+    "total_examples": 8,
+    "total_early_exits": 0,
+    "early_exit_rate": 0.0,
+    "exit_distribution": {},
+    "exit_by_stage": {}
+  },
+  "cost_benefit_analysis": {
+    "s0": {
+      "avg_benefit": 0.05,
+      "benefit_variance": 0.0
+    },
+    "s1": {
+      "avg_benefit": 0.05,
+      "benefit_variance": 0.0
+    },
+    "s2": {
+      "avg_benefit": 0.05,
+      "benefit_variance": 0.0
+    },
+    "s3": {
+      "avg_benefit": 0.05,
+      "benefit_variance": 0.0
+    }
+  },
+  "optimization_recommendations": [],
+  "summary": {
+    "total_examples": 8,
+    "total_tokens": 1081,
+    "total_cost_usd": 0.001081,
+    "total_time_sec": 60.87630271911621,
+    "avg_tokens_per_example": 135.125,
+    "avg_cost_per_example": 0.000135125,
+    "avg_time_per_example": 7.609537839889526,
+    "stage_count": 4
+  }
+}

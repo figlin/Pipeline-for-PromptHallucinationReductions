@@ -20,6 +20,12 @@ class OracleGate:
 		return self.norm(candidate_answer) == self.norm(example.y_true)
 
 
+class NoExitGate:
+	"""Gate that never triggers early exit"""
+	def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool:
+		return False
+
+
 class JudgeGate:
 	def __init__(self, judge_prompt_template: str, threshold: float = 0.5):
 		self.tpl = judge_prompt_template

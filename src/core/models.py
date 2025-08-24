@@ -16,7 +16,6 @@ class Model(Protocol):
     name: str
     def generate(self, prompt: str, **kwargs) -> ModelResponse: ...
 
-# Example dumb adapter (replace with real OpenAI/Anthropic/etc.)
 class EchoModel:
     name = "echo-model"
     def generate(self, prompt: str, temperature: float = 0.0, **kwargs) -> ModelResponse:
@@ -32,14 +31,15 @@ class EchoModel:
 
 class ScaledownDirectModel:
     """
-    Calls a ScaleDown endpoint that BOTH compresses and generates with the
-    provider model specified in payload['model'] (e.g., 'gemini/gemini-pro').
+    Calls ScaleDown compression endpoint that BOTH compresses and generates with the
+    provider model specified in payload['model'] (e.g., 'gemini-2.5-flash').
+    This matches the team lead's example where one API call handles both compression and generation.
     """
     def __init__(
         self,
         api_key: str,
         endpoint: str,                  
-        model: str = "gemini/gemini-2.0-flash",
+        model: str = "gemini-2.5-flash",
         rate: float = 0.7,
         timeout: float = 30.0,
         default_params: Optional[Dict[str, Any]] = None,
@@ -55,22 +55,25 @@ class ScaledownDirectModel:
 
     def generate(self, prompt: str, **kwargs) -> ModelResponse:
         params = {**self.default_params, **kwargs}
+        
+        # Payload matching team lead's example
         payload = {
+            "context": params.pop("context", ""),
             "prompt": prompt,
             "model": self.model,
-            "scaledown": {"rate": self.rate},
-            # REQUIRED by your deployment: 'context' must be a STRING
-            "context": params.pop("context", ""),
+            "scaledown": {
+                "rate": self.rate
+            }
         }
+        
         if "temperature" in params and params["temperature"] is not None:
             payload["temperature"] = params["temperature"]
 
-        # final guard to force string context
-        if not isinstance(payload["context"], str):
-            payload["context"] = ""
-
-        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
-        # right before requests.post(...) in ScaledownDirectModel.generate:
+        headers = {
+            'x-api-key': self.api_key,
+            'Content-Type': 'application/json'
+        }
+        
         if os.getenv("PIPE_DEBUG_HTTP", "0") != "0":
             self.logger.debug("http.request POST %s payload_snip=%s", self.endpoint, json.dumps(payload)[:500])
 
@@ -82,68 +85,71 @@ class ScaledownDirectModel:
             self.logger.error("http.error status=%s body_snip=%s", r.status_code, snip)
             raise RuntimeError(f"ScaleDown HTTP {r.status_code}; body_snip={snip}")
 
-        ctype = (r.headers.get("Content-Type", "") or "").lower()
-        raw = r.text or ""
-        text = ""
-        data = None
-
-        if "application/json" in ctype:
-            try:
-                data = r.json()
-            except Exception:
-                data = None
-
+        try:
+            data = r.json()
+            
             # Treat {"detail": ...} or {"error": ...} as failure
             if isinstance(data, dict) and ("detail" in data or "error" in data):
                 snip = json.dumps(data)[:300]
                 self.logger.error("http.error json=%s", snip)
                 raise RuntimeError(f"ScaleDown error JSON; body_snip={snip}")
 
+            text = ""
             if isinstance(data, dict):
                 text = (
-                    data.get("full_response")
-                    or data.get("compressed_response")
-                    # Generic fields
-                    or data.get("output")
-                    or data.get("text")
-                    or data.get("response")
-                    or data.get("output_text")
-                    or (
-                        data.get("choices", [{}])[0].get("text", "")
-                        if isinstance(data.get("choices"), list) else ""
-                    )
-                    or (
-                        data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        if isinstance(data.get("choices"), list) else ""
-                    )
-                    or ""
+                    data.get("full_response") or
+                    data.get("compressed_response") or
+                    data.get("output") or
+                    data.get("text") or
+                    data.get("response") or
+                    data.get("output_text") or
+                    ""
                 )
 
-        if not text:
-            text = raw.strip()
-        if not text:
-            self.logger.error("http.empty_text")
-            raise RuntimeError("ScaleDown call returned no usable text")
+            if not text:
+                self.logger.error("http.empty_text")
+                raise RuntimeError("ScaleDown call returned no usable text")
 
-        # Best-effort usage accounting
-        ptok = max(1, len(prompt)//4)
-        ctok = max(1, len(text)//4)
-        cost = (ptok + ctok) * 1e-6
+            # Best-effort usage accounting
+            ptok = max(1, len(prompt)//4)
+            ctok = max(1, len(text)//4)
+            cost = (ptok + ctok) * 1e-6
 
-        resp = ModelResponse(
-            text=text.strip(),
-            prompt_tokens=ptok,
-            completion_tokens=ctok,
-            cost=cost,
-            meta={"status": r.status_code}
-        )
-        try:
-            self.logger.info(
-                "http.ok model=%s status=%s ptok=%s ctok=%s cost=%.6f", self.model, r.status_code, ptok, ctok, cost
+            resp = ModelResponse(
+                text=text.strip(),
+                prompt_tokens=ptok,
+                completion_tokens=ctok,
+                cost=cost,
+                meta={"status": r.status_code, "compressed_prompt": data.get("compressed_prompt", "")}
             )
-        except Exception:
-            pass
-        return resp
+            
+            try:
+                self.logger.info(
+                    "http.ok model=%s status=%s ptok=%s ctok=%s cost=%.6f", self.model, r.status_code, ptok, ctok, cost
+                )
+            except Exception:
+                pass
+            return resp
+            
+        except json.JSONDecodeError:
+            # Fallback to raw text if JSON parsing fails
+            text = r.text.strip()
+            if not text:
+                self.logger.error("http.empty_text")
+                raise RuntimeError("ScaleDown call returned no usable text")
+            
+            ptok = max(1, len(prompt)//4)
+            ctok = max(1, len(text)//4)
+            cost = (ptok + ctok) * 1e-6
+
+            resp = ModelResponse(
+                text=text,
+                prompt_tokens=ptok,
+                completion_tokens=ctok,
+                cost=cost,
+                meta={"status": r.status_code}
+            )
+            return resp
 
 # -------------------------
 # Scaledown Wrapper for API usage
@@ -160,8 +166,8 @@ class ScaleDownWrappedModel:
         self,
         base: Model,
         api_key: str,
-        rate: float = 0.7,
-        sd_model: str = "gemini/gemini-pro",
+        rate: float = 0,
+        sd_model: str = "gemini-2.0-flash",
         endpoint: str = "https://api.scaledown.xyz/compress/",
         only_on_min_chars: int = 0,         # set >0 to skip compression for short prompts
         timeout_sec: float = 15.0

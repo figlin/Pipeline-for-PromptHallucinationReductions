@@ -33,5 +33,6 @@ class RunTrace:
     total_cost: float = 0.0
     timing_sec: float = 0.0
     artifacts: Dict[str, Any] = field(default_factory=dict)
+    y_true: Optional[str] = None
 
 

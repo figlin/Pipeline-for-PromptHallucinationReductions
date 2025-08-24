@@ -1,0 +1,105 @@
+2025-08-24 22:48:30,658 WARNING usage_tracker: Failed to initialize database: You can only execute one statement at a time.
+2025-08-24 22:48:30,658 INFO main: Initialized usage tracker with budget: $10.00
+2025-08-24 22:48:30,658 INFO main: Starting pipeline run...
+2025-08-24 22:48:30,658 INFO pipeline: run.start qid=1 question='What is the capital of France?'
+2025-08-24 22:48:32,096 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=18 ctok=1 cost=0.000019
+2025-08-24 22:48:32,102 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:48:32,751 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:48:34,112 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=16 ctok=1 cost=0.000017
+2025-08-24 22:48:34,127 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:48:35,737 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=42 ctok=1 cost=0.000043
+2025-08-24 22:48:35,743 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:48:37,108 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=38 ctok=1 cost=0.000039
+2025-08-24 22:48:37,115 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:48:37,115 INFO pipeline: run.done qid=1 final='Paris' exit=None tokens=118 cost=0.000118 sec=6.456
+2025-08-24 22:48:37,119 INFO main: result qid=1 exit=None tokens=118 correct=True confidence=0.500
+2025-08-24 22:48:37,120 INFO pipeline: run.start qid=2 question="Who wrote the play 'Romeo and Juliet'?"
+2025-08-24 22:48:38,640 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=20 ctok=4 cost=0.000024
+2025-08-24 22:48:38,651 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:48:39,324 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:48:40,576 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=18 ctok=2 cost=0.000020
+2025-08-24 22:48:40,586 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:48:42,529 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=46 ctok=2 cost=0.000048
+2025-08-24 22:48:42,535 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:48:44,060 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=42 ctok=2 cost=0.000044
+2025-08-24 22:48:44,076 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:48:44,077 INFO pipeline: run.done qid=2 final='Shakespeare' exit=None tokens=136 cost=0.000136 sec=6.957
+2025-08-24 22:48:44,081 INFO main: result qid=2 exit=None tokens=136 correct=False confidence=0.500
+2025-08-24 22:48:44,082 INFO pipeline: run.start qid=3 question='What is the tallest mountain in the world above sea level?'
+2025-08-24 22:48:45,750 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=25 ctok=3 cost=0.000028
+2025-08-24 22:48:45,769 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:48:46,445 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:48:47,861 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=23 ctok=3 cost=0.000026
+2025-08-24 22:48:47,882 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:48:50,055 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=51 ctok=3 cost=0.000054
+2025-08-24 22:48:50,069 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:48:51,900 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=47 ctok=3 cost=0.000050
+2025-08-24 22:48:51,916 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:48:51,916 INFO pipeline: run.done qid=3 final='Mount Everest' exit=None tokens=158 cost=0.000158 sec=7.834
+2025-08-24 22:48:51,919 INFO main: result qid=3 exit=None tokens=158 correct=True confidence=0.500
+2025-08-24 22:48:51,920 INFO pipeline: run.start qid=4 question='In what year did the Apollo 11 mission land humans on the Moon?'
+2025-08-24 22:48:53,341 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=26 ctok=1 cost=0.000027
+2025-08-24 22:48:53,346 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:48:54,006 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:48:55,358 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=24 ctok=1 cost=0.000025
+2025-08-24 22:48:55,364 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:48:57,645 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=50 ctok=1 cost=0.000051
+2025-08-24 22:48:57,660 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:48:59,504 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=46 ctok=1 cost=0.000047
+2025-08-24 22:48:59,519 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:48:59,519 INFO pipeline: run.done qid=4 final='1969' exit=None tokens=150 cost=0.000150 sec=7.599
+2025-08-24 22:48:59,523 INFO main: result qid=4 exit=None tokens=150 correct=True confidence=0.500
+2025-08-24 22:48:59,524 INFO pipeline: run.start qid=5 question='What is the chemical symbol for gold?'
+2025-08-24 22:49:00,756 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=19 ctok=1 cost=0.000020
+2025-08-24 22:49:00,761 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:49:01,446 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:49:02,891 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=18 ctok=1 cost=0.000019
+2025-08-24 22:49:02,896 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:49:04,844 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=43 ctok=1 cost=0.000044
+2025-08-24 22:49:04,849 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:49:06,491 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=39 ctok=1 cost=0.000040
+2025-08-24 22:49:06,505 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:49:06,506 INFO pipeline: run.done qid=5 final='Au' exit=None tokens=123 cost=0.000123 sec=6.982
+2025-08-24 22:49:06,509 INFO main: result qid=5 exit=None tokens=123 correct=True confidence=0.500
+2025-08-24 22:49:06,510 INFO pipeline: run.start qid=6 question='What is the smallest prime number?'
+2025-08-24 22:49:08,985 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=19 ctok=1 cost=0.000020
+2025-08-24 22:49:08,999 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:49:09,690 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:49:12,047 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=17 ctok=1 cost=0.000018
+2025-08-24 22:49:12,051 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:49:14,920 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=43 ctok=1 cost=0.000044
+2025-08-24 22:49:14,937 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:49:17,324 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=39 ctok=1 cost=0.000040
+2025-08-24 22:49:17,339 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:49:17,340 INFO pipeline: run.done qid=6 final='Two' exit=None tokens=122 cost=0.000122 sec=10.830
+2025-08-24 22:49:17,343 INFO main: result qid=6 exit=None tokens=122 correct=False confidence=0.500
+2025-08-24 22:49:17,344 INFO pipeline: run.start qid=7 question='What is the capital of Australia?'
+2025-08-24 22:49:18,798 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=18 ctok=2 cost=0.000020
+2025-08-24 22:49:18,815 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:49:19,479 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:49:20,768 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=17 ctok=2 cost=0.000019
+2025-08-24 22:49:20,782 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:49:22,639 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=44 ctok=2 cost=0.000046
+2025-08-24 22:49:22,661 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:49:24,224 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=40 ctok=2 cost=0.000042
+2025-08-24 22:49:24,243 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:49:24,243 INFO pipeline: run.done qid=7 final='Canberra' exit=None tokens=127 cost=0.000127 sec=6.899
+2025-08-24 22:49:24,246 INFO main: result qid=7 exit=None tokens=127 correct=True confidence=0.500
+2025-08-24 22:49:24,247 INFO pipeline: run.start qid=8 question='Who is the current UN Secretary-General?'
+2025-08-24 22:49:25,860 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=20 ctok=4 cost=0.000024
+2025-08-24 22:49:25,869 INFO usage_tracker: Stage s0: 0 tokens, $0.000000 cost
+2025-08-24 22:49:26,541 ERROR models.scaledown: http.error json={"detail": "Internal server error"}
+2025-08-24 22:49:27,928 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=19 ctok=4 cost=0.000023
+2025-08-24 22:49:27,938 INFO usage_tracker: Stage s1: 0 tokens, $0.000000 cost
+2025-08-24 22:49:30,249 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=48 ctok=4 cost=0.000052
+2025-08-24 22:49:30,252 INFO usage_tracker: Stage s2: 0 tokens, $0.000000 cost
+2025-08-24 22:49:31,553 INFO models.scaledown: http.ok model=gemini-2.5-flash status=200 ptok=44 ctok=4 cost=0.000048
+2025-08-24 22:49:31,566 INFO usage_tracker: Stage s3: 0 tokens, $0.000000 cost
+2025-08-24 22:49:31,566 INFO pipeline: run.done qid=8 final='António Guterres' exit=None tokens=147 cost=0.000147 sec=7.319
+2025-08-24 22:49:31,569 INFO main: result qid=8 exit=None tokens=147 correct=True confidence=0.500
+2025-08-24 22:49:31,573 INFO main: Usage summary: 0 tokens, $0.000000 cost
+2025-08-24 22:49:31,573 INFO main: Pipeline run completed. Processed 8 examples.
+2025-08-24 22:49:31,574 INFO main: Generating analysis and visualizations...
+2025-08-24 22:49:34,575 INFO main: Analysis saved to runs\analysis_20250824_224830.json
+2025-08-24 22:49:34,575 INFO main: Plots saved to runs\plots
+2025-08-24 22:49:34,575 INFO main: No optimization recommendations at this time.

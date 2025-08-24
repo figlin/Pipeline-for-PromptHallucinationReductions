@@ -48,7 +48,7 @@ if __name__ == "__main__":
     logger = logging.getLogger("main")
     use_echo = os.getenv("USE_ECHO", "0") not in ("0", "", "false", "False", "FALSE")
     SCALEDOWN_API_KEY = os.getenv("SCALEDOWN_API_KEY")
-    SCALEDOWN_CHAT_URL = os.getenv("SCALEDOWN_CHAT_URL")  # your ScaleDown generation endpoint
+    SCALEDOWN_CHAT_URL = os.getenv("SCALEDOWN_CHAT_URL")  # your ScaleDown compression endpoint
 
     if use_echo:
         echo = EchoModel()
@@ -60,19 +60,19 @@ if __name__ == "__main__":
             "target": ScaledownDirectModel(
                 api_key=SCALEDOWN_API_KEY,
                 endpoint=SCALEDOWN_CHAT_URL,
-                model=os.getenv("SD_MODEL_TARGET", "gemini/gemini-2.0-flash"),
+                model=os.getenv("SD_MODEL_TARGET", "gemini-2.5-flash"),
                 rate=float(os.getenv("SD_RATE_TARGET", "0.7")),
             ),
             "helper": ScaledownDirectModel(
                 api_key=SCALEDOWN_API_KEY,
                 endpoint=SCALEDOWN_CHAT_URL,
-                model=os.getenv("SD_MODEL_HELPER", "gemini/gemini-2.0-flash"),
+                model=os.getenv("SD_MODEL_HELPER", "gemini-2.5-flash"),
                 rate=float(os.getenv("SD_RATE_HELPER", "0.6")),
             ),
             "judge": ScaledownDirectModel(
                 api_key=SCALEDOWN_API_KEY,
                 endpoint=SCALEDOWN_CHAT_URL,
-                model=os.getenv("SD_MODEL_JUDGE", "gemini/gemini-2.0-flash"),
+                model=os.getenv("SD_MODEL_JUDGE", "gemini-2.5-flash"),
                 rate=float(os.getenv("SD_RATE_JUDGE", "0.0")),
                 default_params={"temperature": 0.0},
             ),
@@ -90,9 +90,7 @@ if __name__ == "__main__":
     if enable_judge_stage and not use_echo:
         stages_cfg.append({"type":"judge","id":"s4","judge":"judge","exit_on_pass": True, "threshold": 0.8})
 
-    gate_cfg = {"mode": "oracle"}
-    if enable_judge_gate and not use_echo:
-        gate_cfg = {"mode": "judge", "judge": "judge", "threshold": 0.8, "template": DEFAULT_TEMPLATES["gate_judge"]}
+    gate_cfg = {"mode": "none"}  # Disable judge gate - only use confidence-based early exit
 
     # Budget and tracking configuration
     max_budget_usd = float(os.getenv("MAX_BUDGET_USD", "10.0"))
@@ -101,8 +99,8 @@ if __name__ == "__main__":
     
     # Confidence thresholds for early exit
     confidence_thresholds = {
-        "s0": float(os.getenv("BASELINE_EXIT_CONFIDENCE", "0.0")),  # Disabled by default
-        "s1": float(os.getenv("APO_EXIT_CONFIDENCE", "0.0")),       # Disabled by default
+        "s0": float(os.getenv("BASELINE_EXIT_CONFIDENCE", "0.0")),  # Disabled - baseline should never exit early
+        "s1": float(os.getenv("APO_EXIT_CONFIDENCE", "0.8")),       # Enable early exit after APO with high confidence
         "s2": float(os.getenv("COVE_EXIT_CONFIDENCE", "0.9")),      # High confidence for CoVe
         "s3": float(os.getenv("SELF_CORRECT_EXIT_CONFIDENCE", "0.0"))  # Disabled by default
     }
@@ -120,7 +118,7 @@ if __name__ == "__main__":
         "max_budget_usd": max_budget_usd
     }
 
-    DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")
+    DEBUG = os.getenv("PIPE_DEBUG", "1") not in ("0", "", "false", "False", "FALSE")
     
     # Initialize usage tracker
     usage_tracker = None
@@ -139,35 +137,112 @@ if __name__ == "__main__":
         s = str(s)
         return s if len(s) <= n else s[:n] + "..."
 
-    def print_pretty_trace(t):
-        print("")
-        print("=" * 80)
-        print(f"Q[{t.qid}] {t.question}")
-        print("-" * 80)
-        for r in t.stage_results:
-            print(f"[{r.stage_id}] confidence={r.confidence:.3f}")
+    def print_hallucination_reduction_pipeline(t):
+        """Print a clear, readable view of the hallucination reduction pipeline"""
+        print("\n" + "="*80)
+        print(f"HALLUCINATION REDUCTION PIPELINE - Question {t.qid}")
+        print("="*80)
+        
+        print(f"\nQUESTION: {t.question}")
+        if hasattr(t, 'y_true') and t.y_true:
+            print(f"EXPECTED ANSWER: {t.y_true}")
+        
+        print("\n" + "-"*80)
+        print("PIPELINE STAGES & RESULTS:")
+        print("-"*80)
+        
+        stage_names = {
+            "s0": "BASELINE (Direct Answer)",
+            "s1": "APO (Prompt Optimization)", 
+            "s2": "CoVe (Chain-of-Verification)",
+            "s3": "SELF-CORRECT (Error Fixing)",
+            "s4": "JUDGE (Quality Assessment)"
+        }
+                
+        for i, r in enumerate(t.stage_results):
+            stage_name = stage_names.get(r.stage_id, f"Stage {r.stage_id}")
+            confidence = r.confidence
+            
+            print(f"\n{stage_name}")
+            print(f"   Confidence: {confidence:.3f}")
+            
             ev = r.evidence or {}
-            for key in ("prompt", "helper_in", "optimized", "target_in", "verdict", "error"):
-                if key in ev and ev[key]:
-                    print(f"  {key}: {_snip(ev[key], pipeline.debug_maxlen)}")
-            if r.answer is not None:
-                print(f"  answer: {_snip(r.answer, pipeline.debug_maxlen)}")
-            mu = r.model_usage or {}
-            if isinstance(mu, dict) and ("prompt_tokens" in mu or "completion_tokens" in mu):
-                pt = mu.get("prompt_tokens"); ct = mu.get("completion_tokens")
-                model_name = mu.get("model")
-                print(f"  usage: model={model_name} ptok={pt} ctok={ct}")
-            elif isinstance(mu, dict):
-                for sub, v in mu.items():
-                    if isinstance(v, dict):
-                        pt = v.get("prompt_tokens"); ct = v.get("completion_tokens")
-                        model_name = v.get("model")
-                        if pt or ct or model_name:
-                            print(f"  usage.{sub}: model={model_name} ptok={pt} ctok={ct}")
-        print("-" * 80)
-        print(f"final: {_snip(t.final_answer, pipeline.debug_maxlen)}")
-        print(f"exit_at: {t.early_exit_at}  tokens: {t.total_tokens}  cost: {t.total_cost:.6f}  time: {t.timing_sec:.3f}s")
-        print("=" * 80)
+            
+            if "prompt" in ev:
+                print(f"\n--- PROMPT ({stage_name}) ---")
+                print(ev["prompt"])
+                print("-" * 40)
+            
+            # Show answers / verdicts depending on stage
+            if r.stage_id == "s0" and r.answer:
+                print(f"   Answer: {r.answer}")
+            elif r.stage_id == "s1":  # APO
+                if "helper_in" in ev:
+                    print("\n--- APO REWRITE PROMPT ---")
+                    print(ev["helper_in"])
+                    print("-" * 40)
+                if "target_in" in ev:
+                    print("\n--- APO TARGET PROMPT ---")
+                    print(ev["target_in"])
+                    print("-" * 40)
+                if r.answer:
+                    print(f"   Answer: {r.answer}")
+                if "helper_error" in ev:
+                    print(f"   Error: {ev['helper_error']}")
+            elif r.stage_id == "s2" and r.answer:
+                print(f"   Verified Answer: {r.answer}")
+            elif r.stage_id == "s3" and r.answer:
+                print(f"   Corrected Answer: {r.answer}")
+            elif r.stage_id == "s4" and "verdict" in ev:
+                print(f"   Verdict: {ev['verdict']}")
+        
+        print("\n" + "-"*80)
+        print("FINAL RESULTS:")
+        print("-"*80)
+        
+        # Check if answer is correct
+        expected = getattr(t, 'y_true', None)
+        final_answer = t.final_answer or "No answer generated"
+        is_correct = expected and final_answer.strip().lower() == expected.lower()
+        
+        print(f"FINAL ANSWER: {final_answer}")
+        if expected:
+            print(f"CORRECTNESS: {'CORRECT' if is_correct else 'INCORRECT'} (Expected: {expected})")
+        
+        # Show pipeline efficiency
+        if t.early_exit_at:
+            print(f"EARLY EXIT: Pipeline stopped at stage {t.early_exit_at}")
+            if t.early_exit_at.startswith("gate_after:"):
+                print(f"   REASON: Gate triggered early exit after {t.early_exit_at.split(':')[1]}")
+            else:
+                print(f"   REASON: Stage {t.early_exit_at} requested early exit")
+                # Show confidence threshold info
+                if t.early_exit_at in ["s1", "s2", "s3"]:
+                    stage_result = next((r for r in t.stage_results if r.stage_id == t.early_exit_at), None)
+                    if stage_result:
+                        print(f"   CONFIDENCE: {stage_result.confidence:.3f} (threshold met)")
+        else:
+            print(f"COMPLETION: All stages completed")
+            
+        print(f"COST: ${t.total_cost:.6f}")
+        print(f"TIME: {t.timing_sec:.3f}s")
+        print(f"TOKENS: {t.total_tokens}")
+        
+        # Show hallucination reduction effectiveness
+        if len(t.stage_results) > 1:
+            baseline_answer = t.stage_results[0].answer if t.stage_results[0].answer else "No baseline answer"
+            final_answer = t.final_answer or "No final answer"
+            
+            print(f"\nHALLUCINATION REDUCTION ANALYSIS:")
+            print(f"   Baseline: {baseline_answer}")
+            print(f"   Final: {final_answer}")
+            
+            if baseline_answer != final_answer:
+                print(f"   Pipeline modified the answer - potential hallucination reduction!")
+            else:
+                print(f"   Answer unchanged - baseline was already good")
+        
+        print("="*80 + "\n")
 
     # Run pipeline
     logger.info("Starting pipeline run...")
@@ -175,9 +250,22 @@ if __name__ == "__main__":
     for ex in dataset:
         trace = pipeline.run_one(ex)
         traces.append(trace)
-        
+
+        # -------------------------------
+        # NEW: Immediate print of APO prompt
+        # -------------------------------
+        apo_stage = next((r for r in trace.stage_results if r.stage_id == "s1"), None)
+        optimized_prompt = (apo_stage.evidence or {}).get("optimized") if apo_stage else None
+        if optimized_prompt:
+            print("\n" + "-"*80)
+            print(f"QID {ex.qid} — Optimized Prompt (APO)")
+            print("-"*80)
+            print(optimized_prompt)
+            print("-"*80 + "\n")
+            logger.info("optimized_prompt qid=%s\n%s", ex.qid, optimized_prompt)
+
         if DEBUG:
-            print_pretty_trace(trace)
+            print_hallucination_reduction_pipeline(trace)
         
         corr = bool(trace.final_answer and trace.final_answer.strip().lower() == (ex.y_true or "").lower())
         logger.info("result qid=%s exit=%s tokens=%s correct=%s confidence=%.3f", 
@@ -202,6 +290,46 @@ if __name__ == "__main__":
         logger.info(f"Usage summary: {usage_summary['total_tokens']} tokens, ${usage_summary['total_cost_usd']:.6f} cost")
     
     logger.info(f"Pipeline run completed. Processed {len(traces)} examples.")
+    
+    # Print summary of hallucination reduction effectiveness
+    if traces:
+        print("\n" + "="*80)
+        print("HALLUCINATION REDUCTION PIPELINE SUMMARY")
+        print("="*80)
+        
+        total_questions = len(traces)
+        correct_answers = sum(1 for t in traces if t.final_answer and t.y_true and 
+                            t.final_answer.strip().lower() == t.y_true.lower())
+        accuracy = (correct_answers / total_questions) * 100 if total_questions > 0 else 0
+        
+        print(f"\nACCURACY: {correct_answers}/{total_questions} ({accuracy:.1f}%)")
+        
+        # Show how many answers were modified by the pipeline
+        modified_answers = 0
+        for t in traces:
+            if len(t.stage_results) > 1:
+                baseline_answer = t.stage_results[0].answer if t.stage_results[0].answer else ""
+                final_answer = t.final_answer or ""
+                if baseline_answer != final_answer:
+                    modified_answers += 1
+        
+        print(f"ANSWERS MODIFIED: {modified_answers}/{total_questions} ({modified_answers/total_questions*100:.1f}%)")
+        
+        # Show average confidence
+        avg_confidence = sum(max((r.confidence for r in t.stage_results), default=0.0) 
+                           for t in traces) / total_questions if total_questions > 0 else 0
+        print(f"AVERAGE CONFIDENCE: {avg_confidence:.3f}")
+        
+        # Show cost and efficiency
+        total_cost = sum(t.total_cost for t in traces)
+        total_tokens = sum(t.total_tokens for t in traces)
+        avg_time = sum(t.timing_sec for t in traces) / total_questions if total_questions > 0 else 0
+        
+        print(f"TOTAL COST: ${total_cost:.6f}")
+        print(f"TOTAL TOKENS: {total_tokens}")
+        print(f"AVERAGE TIME: {avg_time:.3f}s per question")
+        
+        print("\n" + "="*80)
     
     # Generate analysis and visualizations
     if enable_tracking and traces:
@@ -233,5 +361,3 @@ if __name__ == "__main__":
                 logger.info(f"    Potential savings: {rec.potential_savings_tokens} tokens, ${rec.potential_savings_cost:.4f}")
         else:
             logger.info("No optimization recommendations at this time.")
-
-
