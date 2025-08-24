@@ -39,7 +39,7 @@ class Pipeline:
         ctx: Dict[str, Any] = {}
         last_answer: Optional[str] = None
 
-        self._dbg(f"\n=== RUN {ex.qid} :: {ex.question!r} ===")
+        self._dbg(f"\n=== Dataset Question {ex.qid} :: {ex.question!r} - \"{ex.y_true or 'No Answer'}\" ===")
 
         for stage in self.stages:
             if last_answer is not None:
@@ -184,6 +184,12 @@ def build_pipeline(
                 exit_on_pass=bool(s.get("exit_on_pass", True)),
                 threshold=float(s.get("threshold", 0.5))
             ))
+        elif t == "confidence_check":
+            stages.append(make_stage("confidence_check",
+                id=sid,
+                model=models[s["model"]],
+                template=s.get("template", DEFAULT_TEMPLATES["confidence_check"])
+            ))
         else:
             kw = {k:v for k,v in s.items() if k not in {"type"}}
             stages.append(make_stage(t, **kw))
@@ -196,23 +202,23 @@ def build_pipeline(
     )
 
 DEFAULT_TEMPLATES = {
-    "baseline": "Q: {question}\nA:",
+    "baseline": "Answer in one word or phrase only.\n\nQ: {question}\nA:",
     "apo_rewrite": (
         "Rewrite the user question into a concise, specific prompt that reduces ambiguity "
         "and includes constraints to avoid hallucinations. Output only the rewritten prompt.\n\nQ: {question}"
     ),
-    "apo_target": "Use this optimized prompt:\n\n{optimized_prompt}\n\nAnswer succinctly and cite key facts.",
+    "apo_target": "Answer in one word or phrase only.\n\n{optimized_prompt}",
     "cove": (
-        "You are verifying an answer’s factuality via Chain-of-Verification.\n"
+        "Answer in one word or phrase only. Verify the answer's factuality first.\n"
         "Question: {question}\n"
         "Prior answer: {prior_answer}\n"
-        "1) List claims.\n2) Verify each claim with independent checks.\n3) Give a corrected final answer only."
+        "Give only the corrected final answer."
     ),
     "self_correct": (
-        "Revise only factual errors at temperature 0.\n"
+        "Answer in one word or phrase only. Fix any factual errors.\n"
         "Question: {question}\n"
         "Current answer: {prior_answer}\n"
-        "Return a corrected final answer only."
+        "Return only the corrected answer."
     ),
     "judge": (
         "You are a strict fact-checking judge.\n"
@@ -225,5 +231,13 @@ DEFAULT_TEMPLATES = {
         "Question: {question}\n"
         "Answer: {answer}\n"
         "Return PASS <p=...> or FAIL <p=...>."
+    ),
+    "confidence_check": (
+        "You have answered incorrectly in previous stages. The correct answer is '{correct_answer}'.\n"
+        "Your previous answer was: '{previous_answer}'\n"
+        "Question: {question}\n\n"
+        "Please respond with exactly one of these two options:\n"
+        "1. 'My last answer was correct, I am confident in it.'\n"
+        "2. 'I was wrong and do not know the answer.'"
     )
 }

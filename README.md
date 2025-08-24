@@ -1,15 +1,17 @@
 # Pipeline for Prompt Hallucination Reductions
 
-This repository implements a modular pipeline for reducing prompt hallucinations in LLM answers using composable stages such as baseline ask, prompt optimization, chain-of-verification, self-correction, and external judgment. The pipeline is model-agnostic and supports ScaleDown prompt compression. It is designed to be easy to extend, debug, and evaluate.
+This repository implements a modular pipeline for reducing prompt hallucinations in LLM answers using composable stages such as baseline ask, prompt optimization, chain-of-verification, self-correction, confidence checking, and external judgment. The pipeline supports multiple model backends (Ollama, Gemini, ScaleDown compression) with environment-variable based configuration.
 
 ## Features
 
-- **Composable Stages**: Baseline, APO (prompt rewrite), CoVe (Chain-of-Verification), Self-correct, Judge, and more.
+- **Composable Stages**: Baseline, APO (prompt rewrite), CoVe (Chain-of-Verification), Self-correct, Confidence Check, Judge, and more.
+- **Multiple Model Backends**: Ollama (local), Gemini API, and ScaleDown token compression wrapper.
+- **Environment-Based Configuration**: Single .env file controls all model assignments and settings.
+- **Singular Answer Prompting**: Optimized for concise, one-word/phrase responses to reduce fluff.
+- **Binary Answer Checking**: Direct comparison against ground truth without judge calls.
 - **Early Exit Policies**: Oracle or LLM-based gates for efficiency.
-- **Model Agnostic**: Easily plug in different LLM backends or adapters.
-- **Prompt Compression**: Built-in support for ScaleDown prompt compression.
-- **Debugging**: Verbose debug output and prompt/answer diffs.
-- **Minimal Example Dataset**: For quick testing and demonstration.
+- **Debugging**: Verbose debug output with human-readable stage names and model information.
+- **Real Dataset Support**: SimpleQA and TruthfulQA benchmark datasets included.
 
 ## Getting Started
 
@@ -17,8 +19,9 @@ This repository implements a modular pipeline for reducing prompt hallucinations
 
 - Python 3.8+
 - `uv` or `pip`
-- Access to [ScaleDown](https://scaledown.xyz/) API (or compatible endpoint).
-- A local [Ollama](https://ollama.com/) installation (for running local models).
+- **Optional**: [ScaleDown](https://scaledown.xyz/) API key for token compression
+- **Optional**: Google Gemini API key for Gemini models
+- **Optional**: Local [Ollama](https://ollama.com/) installation for local models
 
 Install dependencies:
 ```bash
@@ -31,31 +34,52 @@ pip install requests python-dotenv
 
 ### Environment Variables
 
-Create a file named `.env` in the root directory by copying the contents of `.env.example`, then fill in the required values.
+Create a `.env` file in the root directory with these variables:
 
-Set these variables in your environment before running:
+#### Model Configuration
+```env
+# Model types for each role: ollama, gemini, scaledown
+TARGET_MODEL_TYPE=ollama
+HELPER_MODEL_TYPE=ollama  
+JUDGE_MODEL_TYPE=ollama
 
-| Variable              | Description                                              | Example                                 |
-|-----------------------|----------------------------------------------------------|-----------------------------------------|
-| `SCALEDOWN_API_KEY`   | Your ScaleDown API key                                   | `sk-xxx...`                             |
-| `SCALEDOWN_CHAT_URL`  | ScaleDown endpoint for generation/compression            | `https://api.scaledown.xyz/generate`    |
-| `LLM_API_KEY`         | Your LLM API key (After you create a LLM plugin)         | `sk-xxx...`                             |
-| `SD_MODEL_TARGET`     | Model name for main answer model (default: gemini/gemini-pro) | `gemini/gemini-pro`                     |
-| `SD_MODEL_HELPER`     | Model name for helper (APO) model                        | `gemini/gemini-pro`                     |
-| `SD_MODEL_JUDGE`      | Model name for judge model                               | `gemini/gemini-pro`                     |
-| `SD_RATE_TARGET`      | Compression rate for target model (float, default: 0.7)  | `0.7`                                   |
-| `SD_RATE_HELPER`      | Compression rate for helper model (float, default: 0.6)  | `0.6`                                   |
-| `SD_RATE_JUDGE`       | Compression rate for judge model (float, default: 0.0)   | `0.0`                                   |
-| `PIPE_DEBUG`          | Enable debug output (`1` for True, else False)           | `1`                                     |
-| `PIPE_DEBUG_MAXLEN`   | Max length for debug output snippets (default: 220)      | `220`                                   |
-| `PIPE_DEBUG_HTTP`     | Print HTTP payloads (`1` for True, else False)           | `1`                                     |
-| `DATASET_PATH`        | Path to a CSV dataset, or "internal" for the default.    | `data/simple_qa_test_set.csv`           |
+# Ollama settings (if using ollama model type)
+OLLAMA_MODEL=gemma3:27b
+OLLAMA_ENDPOINT=http://localhost:11434/api/generate
+
+# Gemini settings (if using gemini or scaledown model type)
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-1.5-flash
+
+# ScaleDown settings (if using scaledown model type)
+SCALEDOWN_API_KEY=your_scaledown_api_key
+TARGET_BASE_MODEL=gemini    # Base model for scaledown: gemini or ollama
+HELPER_BASE_MODEL=gemini
+JUDGE_BASE_MODEL=gemini
+SD_RATE_TARGET=0.7          # Compression rates (0.0-1.0)
+SD_RATE_HELPER=0.6
+SD_RATE_JUDGE=0.0
+```
+
+#### Other Settings
+```env
+PIPE_DEBUG=1                              # Enable debug output
+PIPE_DEBUG_MAXLEN=220                     # Max length for debug snippets
+DATASET_PATH=data/simple_qa_test_set.csv  # Dataset file or "internal"
+```
 
 ### Running
 
-Ensure your `.env` file is correctly configured. To run with a CSV file, set `DATASET_PATH` in your `.env` file.
+Ensure your `.env` file is correctly configured. The pipeline will display model configuration at startup:
 
-Run the pipeline demo:
+```
+=== Model Configuration ===
+Target: ollama:gemma3:27b
+Helper: scaledown(gemini:gemini-1.5-flash)
+Judge: gemini:gemini-1.5-flash
+```
+
+Run the pipeline:
 ```bash
 # Using uv
 uv run main.py
@@ -64,43 +88,110 @@ uv run main.py
 python main.py
 ```
 
-This will process the dataset specified by `DATASET_PATH` and print results, including per-stage outputs, diffs, token usage, and final answers.
+Sample output:
+```
+=== Dataset Question 1 :: 'Who received the IEEE Frank Rosenblatt Award in 2010?' - "Geoffrey Hinton" ===
 
-### Custom Configuration
+[1] Q: Who received the IEEE Frank Rosenblatt Award in 2010?
+  Final: Geoffrey Hinton
+  Exit at: Completed All Stages
+  Tokens: 42
+  Correct: True
+```
 
-Pipeline stages and gate policies can be customized in `main.py` via the `config` dictionary:
+## Model Types
+
+The pipeline supports three model types for each role (target/helper/judge):
+
+- **`ollama`**: Direct connection to local Ollama API
+- **`gemini`**: Direct connection to Google Gemini API
+- **`scaledown`**: ScaleDown token compression → Base model (Gemini or Ollama)
+
+### ScaleDown Integration
+
+ScaleDown is used purely as a **token compression wrapper**:
+- Compresses prompts before sending to base model
+- Reduces token usage and API costs
+- Supports wrapping any base model (Gemini or Ollama)
+- Compression rates: 0.0 (no compression) to 1.0 (maximum compression)
+
+### Pipeline Stages
+
+Current default pipeline configuration:
 
 ```python
 config = {
     "stages": [
-        {"type":"baseline","id":"s0","model":"target"},
-        {"type":"apo","id":"s1","helper":"helper","target":"target"},
-        {"type":"cove","id":"s2","model":"target"},
-        {"type":"self_correct","id":"s3","model":"target"},
-        {"type":"judge","id":"s4","judge":"judge","exit_on_pass": True, "threshold": 0.8}
+        {"type":"baseline","id":"s0","model":"target"},           # Basic prompting
+        {"type":"apo","id":"s1","helper":"helper","target":"target"}, # Prompt optimization
+        {"type":"cove","id":"s2","model":"target"},               # Chain of verification
+        {"type":"self_correct","id":"s3","model":"target"},       # Self-correction
+        {"type":"confidence_check","id":"s4","model":"target"},   # Confidence assessment
     ],
-    "gate": {"mode": "judge", "judge": "judge", "threshold": 0.8, "template": ...},
+    "gate": {"mode": "oracle"},  # Uses ground truth for early exit
     "token_diffs": True
 }
 ```
 
-See `main.py` or `depricated_pipeline.py.old` for further details and examples.
+### Stage Types Available
+
+- **`baseline`**: Direct question → answer prompting
+- **`apo`**: Automatic Prompt Optimization (helper rewrites prompt, target answers)
+- **`cove`**: Chain-of-Verification (fact-checking previous answer)  
+- **`self_correct`**: Self-correction of previous answer
+- **`confidence_check`**: Tests model confidence when shown correct answer
+- **`judge`**: External model judges answer correctness
+
+## Key Changes in This Session
+
+### 1. **Singular Answer Prompting**
+- Updated all prompt templates to request concise, one-word/phrase responses
+- Eliminates verbose LLM responses to focus on core answers
+
+### 2. **Binary Answer Checking** 
+- Direct string comparison against ground truth answers
+- Removed dependency on LLM judge calls for basic correctness checking
+- Uses oracle gate mode for early exit based on ground truth
+
+### 3. **Clean Model Architecture**
+- Removed `ScaledownDirectModel` - now ScaleDown is purely a compression wrapper  
+- Three model types: `ollama` (local), `gemini` (API), `scaledown` (compression wrapper)
+- Environment-based configuration for all model assignments
+
+### 4. **Enhanced Debug Output**
+- Shows model configuration at startup
+- Human-readable stage technique names (e.g., "APO (Automatic Prompt Optimization)")
+- Dataset questions display correct answers alongside questions
+- Descriptive exit information instead of just stage IDs
+
+### 5. **Confidence Check Stage**
+- New stage that reveals correct answer and tests model honesty
+- Forces choice between claiming confidence or admitting uncertainty
+- Tracks whether models can assess their own confidence accurately
+
+### 6. **Environment Variable Configuration**
+```env
+TARGET_MODEL_TYPE=ollama    # Target model for all answer stages
+HELPER_MODEL_TYPE=gemini    # Helper model for APO prompt rewriting  
+JUDGE_MODEL_TYPE=scaledown  # Judge model for evaluation stages
+```
 
 ## File Overview
 
-- `main.py` - Entry point and pipeline configuration.
-- `pipeline.py` - Pipeline runner and configuration utilities.
-- `stages.py` - Stage implementations and registry.
-- `models.py` - Model adapters and wrappers (ScaleDown, etc.).
-- `dataset.py` - Example question dataset for evaluation.
-- `depricated_pipeline.py.old` - Older full-in-one script, for reference.
-- `utils.py` - Some utilities
+- `main.py` - Entry point with environment-based model configuration
+- `pipeline.py` - Pipeline runner with updated debug output and templates
+- `stages.py` - Stage implementations including new confidence_check stage
+- `models.py` - Clean model adapters (Ollama, Gemini, ScaleDown wrapper)
+- `dataset.py` - Dataset loading with SimpleQA and TruthfulQA support  
+- `utils.py` - Utilities and data structures
+- `data/` - Benchmark datasets (SimpleQA, TruthfulQA)
 
 ## Extending
 
-- Add new stages by implementing the `Stage` protocol and registering via `@register_stage`.
-- To add new models, implement the `Model` protocol.
-- You can use or modify the provided prompt templates in `main.py` as needed.
+- Add new stages by implementing the `Stage` protocol and registering via `@register_stage`
+- Add new models by implementing the `Model` protocol in `models.py`  
+- Modify prompt templates in the `DEFAULT_TEMPLATES` dictionary
+- Create custom model configurations using the environment variable system
 
 ## License
 

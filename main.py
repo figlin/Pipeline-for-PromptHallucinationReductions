@@ -6,7 +6,7 @@ import sys
 from dotenv import load_dotenv
 
 from dataset import dataset, load_from_csv  # Assuming dataset.py is in the same directory
-from models import Model,ScaledownDirectModel, OllamaModel
+from models import Model, ScaleDownWrappedModel, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
 
 load_dotenv()
@@ -17,54 +17,108 @@ load_dotenv()
 
 if __name__ == "__main__":
     # Read env
-    SCALEDOWN_API_KEY = os.environ["SCALEDOWN_API_KEY"]
-    SCALEDOWN_CHAT_URL = os.environ["SCALEDOWN_CHAT_URL"]  # your ScaleDown generation endpoint
+    SCALEDOWN_API_KEY = os.environ.get("SCALEDOWN_API_KEY")
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    
+    # Model type configuration from env
+    TARGET_MODEL_TYPE = os.getenv("TARGET_MODEL_TYPE", "ollama")  # ollama, gemini, scaledown
+    HELPER_MODEL_TYPE = os.getenv("HELPER_MODEL_TYPE", "ollama")
+    JUDGE_MODEL_TYPE = os.getenv("JUDGE_MODEL_TYPE", "ollama")
+    
+    # Ollama settings
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:27b")
+    OLLAMA_ENDPOINT = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate")
+    
+    # Gemini settings  
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    
+    def get_stage_technique(stage_id: str, stages_config: list) -> str:
+        """Get the optimization technique name for a stage"""
+        stage_map = {
+            "baseline": "Baseline (No Optimization)",
+            "apo": "APO (Automatic Prompt Optimization)",
+            "cove": "CoVe (Chain-of-Verification)",
+            "self_correct": "Self-Correction",
+            "confidence_check": "Confidence Check",
+            "judge": "Judge Evaluation"
+        }
+        
+        for stage in stages_config:
+            if stage.get("id") == stage_id:
+                return stage_map.get(stage["type"], f"Unknown ({stage['type']})")
+        return "Unknown Stage"
+
+    def create_model(model_type: str, role: str) -> Model:
+        """Create a model based on type and role (target/helper/judge)"""
+        if model_type == "ollama":
+            return OllamaModel(
+                model=OLLAMA_MODEL,
+                endpoint=OLLAMA_ENDPOINT,
+                timeout=240.0,
+            )
+        elif model_type == "gemini":
+            temp = 0.2 if role == "helper" else 0.0
+            return GeminiModel(
+                api_key=GEMINI_API_KEY,
+                model=GEMINI_MODEL,
+                default_params={"temperature": temp}
+            )
+        elif model_type == "scaledown":
+            # ScaleDown can wrap any base model - defaults to Gemini
+            base_model_type = os.getenv(f"{role.upper()}_BASE_MODEL", "gemini")  # gemini or ollama
+            
+            if base_model_type == "gemini":
+                temp = 0.2 if role == "helper" else 0.0
+                base_model = GeminiModel(
+                    api_key=GEMINI_API_KEY,
+                    model=GEMINI_MODEL,
+                    default_params={"temperature": temp}
+                )
+            elif base_model_type == "ollama":
+                base_model = OllamaModel(
+                    model=OLLAMA_MODEL,
+                    endpoint=OLLAMA_ENDPOINT,
+                    timeout=240.0,
+                )
+            else:
+                raise ValueError(f"Unknown base model type for ScaleDown: {base_model_type}")
+                
+            rate = float(os.getenv(f"SD_RATE_{role.upper()}", "0.7"))
+            return ScaleDownWrappedModel(
+                base=base_model,
+                api_key=SCALEDOWN_API_KEY,
+                rate=rate,
+            )
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
 
     models: Dict[str, Model] = {
-        "target": ScaledownDirectModel(
-            api_key=SCALEDOWN_API_KEY,
-            endpoint=SCALEDOWN_CHAT_URL,
-            model=os.getenv("SD_MODEL_TARGET") or "gemini/gemini-pro",
-            rate=float(os.getenv("SD_RATE_TARGET") or "0.7"),
-        ),
-        "helper": ScaledownDirectModel(
-            api_key=SCALEDOWN_API_KEY,
-            endpoint=SCALEDOWN_CHAT_URL,
-            model=os.getenv("SD_MODEL_HELPER") or "gemini/gemini-pro",
-            rate=float(os.getenv("SD_RATE_HELPER") or "0.6"),
-        ),
-        "judge": ScaledownDirectModel(
-            api_key=SCALEDOWN_API_KEY,
-            endpoint=SCALEDOWN_CHAT_URL,
-            model=os.getenv("SD_MODEL_JUDGE") or "gemini/gemini-pro",
-            rate=float(os.getenv("SD_RATE_JUDGE") or "0.0"),
-            default_params={"temperature": 0.0},
-        ),
-        # You could wrap any model with compression like:
-        # "target": ScaleDownWrappedModel(base=SomeOtherModel(...), api_key=SCALEDOWN_API_KEY, rate=0.7)
-        
-        # --- Add your Ollama model here ---
-        "my_ollama_model": OllamaModel(
-            model="gemma3:27b",  # The model name your Ollama server is using
-            # endpoint="http://localhost:11434/api/generate", # Optional: if not default
-             timeout=240.0, # Optional: increase timeout for slow models
-        ),
+        "target": create_model(TARGET_MODEL_TYPE, "target"),
+        "helper": create_model(HELPER_MODEL_TYPE, "helper"), 
+        "judge": create_model(JUDGE_MODEL_TYPE, "judge"),
     }
 
     config = {
         "stages": [
-            {"type":"baseline","id":"s0","model":"my_ollama_model"}, # <-- Example using the ollama model
-            # {"type":"baseline","id":"s0","model":"target"},
-            {"type":"apo","id":"s1","helper":"helper","target":"target"},
-            {"type":"cove","id":"s2","model":"target"},
-            {"type":"self_correct","id":"s3","model":"target"},
-            {"type":"judge","id":"s4","judge":"judge","exit_on_pass": True, "threshold": 0.8}
+            {"type":"baseline","id":"s0","model":"target"}, # Target model baseline
+            {"type":"apo","id":"s1","helper":"helper","target":"target"}, # Helper rewrites, target answers
+            {"type":"cove","id":"s2","model":"target"}, # Target model verification
+            {"type":"self_correct","id":"s3","model":"target"}, # Target model self-correction
+            {"type":"confidence_check","id":"s4","model":"target"}, # Target model confidence check
+            # {"type":"judge","id":"s5","judge":"judge","exit_on_pass": True, "threshold": 0.8}
         ],
-        "gate": {"mode": "judge", "judge": "judge", "threshold": 0.8, "template": DEFAULT_TEMPLATES["gate_judge"]},
+        "gate": {"mode": "oracle"},
         "token_diffs": True
     }
 
     DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")
+    # Print model configuration
+    print("=== Model Configuration ===")
+    print(f"Target: {models['target'].name}")
+    print(f"Helper: {models['helper'].name}")
+    print(f"Judge: {models['judge'].name}")
+    print()
+
     pipe = build_pipeline(config, models)
     # re-wrap with debug (or pass debug into a factory if you prefer)
     pipe.debug = DEBUG
@@ -88,10 +142,18 @@ if __name__ == "__main__":
         trace = pipe.run_one(ex)
         print(f"[{ex.qid}] Q: {ex.question}")
         print("  Final:", trace.final_answer)
-        print("  Exit at:", trace.early_exit_at)
+        exit_technique = "Completed All Stages"
+        if trace.early_exit_at:
+            if trace.early_exit_at.startswith("gate_after:"):
+                stage_id = trace.early_exit_at.split(":", 1)[1]
+                exit_technique = f"Gate Exit after {get_stage_technique(stage_id, config['stages'])}"
+            else:
+                exit_technique = f"Stage Exit at {get_stage_technique(trace.early_exit_at, config['stages'])}"
+        print("  Exit at:", exit_technique)
         print("  Tokens:", trace.total_tokens)
         if ex.y_true:
-            print("  Correct:", trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower())
+            is_correct = trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower()
+            print("  Correct:", is_correct)
         print("-" * 50)
     
     if 'trace' in locals() and trace:

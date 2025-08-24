@@ -25,106 +25,6 @@ class EchoModel:
         ctok = max(1, len(txt)//4)
         return ModelResponse(text=txt, prompt_tokens=ptok, completion_tokens=ctok, cost=(ptok+ctok)*1e-6)
 
-# -------------------------
-# ScaleDown direct generator
-# -------------------------
-
-class ScaledownDirectModel:
-    """
-    Calls a ScaleDown endpoint that BOTH compresses and generates with the
-    provider model specified in payload['model'] (e.g., 'gemini/gemini-pro').
-    """
-    def __init__(
-        self,
-        api_key: str,
-        endpoint: str,                  # e.g., https://api.scaledown.xyz/<your-generate-endpoint>
-        model: str = "gemini/gemini-pro",
-        rate: float = 0.7,
-        timeout: float = 30.0,
-        default_params: Optional[Dict[str, Any]] = None,
-    ):
-        self.api_key = api_key
-        self.endpoint = endpoint
-        self.model = model
-        self.rate = rate
-        self.timeout = timeout
-        self.default_params = default_params or {"temperature": 0.0}
-        self.name = f"scaledown:{model}"
-
-    def generate(self, prompt: str, **kwargs) -> ModelResponse:
-        params = {**self.default_params, **kwargs}
-        payload = {
-            "prompt": prompt,
-            "model": self.model,
-            "scaledown": {"rate": self.rate},
-            # REQUIRED by your deployment: 'context' must be a STRING
-            "context": params.pop("context", ""),
-        }
-        if "temperature" in params and params["temperature"] is not None:
-            payload["temperature"] = params["temperature"]
-
-        # final guard to force string context
-        if not isinstance(payload["context"], str):
-            payload["context"] = ""
-
-        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
-        # right before requests.post(...) in ScaledownDirectModel.generate:
-        if os.getenv("PIPE_DEBUG_HTTP", "0") != "0":
-            print("POST", self.endpoint, "payload:", json.dumps(payload)[:500])
-
-        r = requests.post(self.endpoint, headers=headers, data=json.dumps(payload), timeout=self.timeout)
-
-        # Treat non-2xx as error
-        if r.status_code >= 400:
-            snip = (r.text or "")[:300].replace("\n", "\\n")
-            raise RuntimeError(f"ScaleDown HTTP {r.status_code}; body_snip={snip}")
-
-        ctype = (r.headers.get("Content-Type", "") or "").lower()
-        raw = r.text or ""
-        text = ""
-        data = None
-
-        if "application/json" in ctype:
-            try:
-                data = r.json()
-            except Exception:
-                data = None
-
-            # Treat {"detail": ...} or {"error": ...} as failure
-            if isinstance(data, dict) and ("detail" in data or "error" in data):
-                snip = json.dumps(data)[:300]
-                raise RuntimeError(f"ScaleDown error JSON; body_snip={snip}")
-
-            if isinstance(data, dict):
-                text = (
-                    data.get("output")
-                    or data.get("text")
-                    or data.get("response")
-                    or data.get("output_text")
-                    or (data.get("choices",[{}])[0].get("text","")
-                        if isinstance(data.get("choices"), list) else "")
-                    or (data.get("choices",[{}])[0].get("message",{}).get("content","")
-                        if isinstance(data.get("choices"), list) else "")
-                    or ""
-                )
-
-        if not text:
-            text = raw.strip()
-        if not text:
-            raise RuntimeError("ScaleDown call returned no usable text")
-
-        # Best-effort usage accounting
-        ptok = max(1, len(prompt)//4)
-        ctok = max(1, len(text)//4)
-        cost = (ptok + ctok) * 1e-6
-
-        return ModelResponse(
-            text=text.strip(),
-            prompt_tokens=ptok,
-            completion_tokens=ctok,
-            cost=cost,
-            meta={"status": r.status_code}
-        )
 
 # -------------------------
 # Scaledown Wrapper for API usage
@@ -231,6 +131,85 @@ class ScaleDownWrappedModel:
         resp.meta["base_model_name"] = getattr(self.base, "name", "unknown")
         self.name = f"scaledown({resp.meta['base_model_name']})"
         return resp
+
+# -------------------------
+# Gemini API model
+# -------------------------
+
+class GeminiModel:
+    """
+    Direct Gemini API client without ScaleDown compression.
+    """
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-1.5-flash",
+        endpoint: str = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent",
+        timeout: float = 30.0,
+        default_params: Optional[Dict[str, Any]] = None,
+    ):
+        self.api_key = api_key
+        self.model = model
+        self.endpoint = endpoint.format(model=model)
+        self.timeout = timeout
+        self.default_params = default_params or {"temperature": 0.0}
+        self.name = f"gemini:{model}"
+
+    def generate(self, prompt: str, **kwargs) -> ModelResponse:
+        params = {**self.default_params, **kwargs}
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }],
+            "generationConfig": {
+                "temperature": params.get("temperature", 0.0),
+                "maxOutputTokens": params.get("max_tokens", 2048),
+            }
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+        }
+        
+        # Add API key to URL for Gemini
+        url = f"{self.endpoint}?key={self.api_key}"
+        
+        r = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+
+        if r.status_code >= 400:
+            snip = (r.text or "")[:300].replace("\n", "\\n")
+            raise RuntimeError(f"Gemini HTTP {r.status_code}; body_snip={snip}")
+
+        try:
+            data = r.json()
+        except json.JSONDecodeError:
+            raise RuntimeError(f"Gemini returned invalid JSON: {r.text}")
+
+        # Extract text from Gemini response format
+        text = ""
+        if "candidates" in data and len(data["candidates"]) > 0:
+            candidate = data["candidates"][0]
+            if "content" in candidate and "parts" in candidate["content"]:
+                parts = candidate["content"]["parts"]
+                if len(parts) > 0 and "text" in parts[0]:
+                    text = parts[0]["text"]
+
+        if not text:
+            raise RuntimeError(f"Gemini call returned no usable text: {data}")
+
+        # Extract usage info if available
+        usage = data.get("usageMetadata", {})
+        prompt_tokens = usage.get("promptTokenCount", max(1, len(prompt)//4))
+        completion_tokens = usage.get("candidatesTokenCount", max(1, len(text)//4))
+        
+        return ModelResponse(
+            text=text.strip(),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=(prompt_tokens + completion_tokens) * 1e-6,  # rough estimate
+            meta={"status": r.status_code}
+        )
 
 # -------------------------
 # Ollama local model (for local LLM testing)
