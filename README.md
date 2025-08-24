@@ -21,7 +21,7 @@ This repository implements a modular pipeline for reducing prompt hallucinations
 
 Install dependencies:
 ```bash
-pip install requests
+uv sync
 ```
 
 ### Environment Variables
