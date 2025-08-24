@@ -20,7 +20,8 @@ class Example:
     qid: str
     question: str
     y_true: Optional[str] = None
-    meta: Dict[str, Any] = field(default_factory=dict)  # <-- keep this
+    # ⭐ Added so Ezequiel's dataset extras can be passed around
+    meta: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class StageResult:
