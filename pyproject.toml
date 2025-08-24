@@ -4,4 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "evaluate>=0.4.5",
+    "lighteval>=0.0.1",
+    "pydantic>=2.11.7",
+    "transformers>=4.55.4",
+]
