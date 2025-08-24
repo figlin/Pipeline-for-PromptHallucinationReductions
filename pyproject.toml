@@ -9,4 +9,5 @@ dependencies = [
     "lighteval>=0.0.1",
     "pydantic>=2.11.7",
     "transformers>=4.55.4",
+    "requests>=2.32.5",
 ]
