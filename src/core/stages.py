@@ -15,7 +15,6 @@ class Stage(Protocol):
     def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult: ...
 
 _STAGE_REGISTRY: Dict[str, Callable[..., Stage]] = {}
-
 def register_stage(name: str):
     def deco(factory: Callable[..., Stage]):
         _STAGE_REGISTRY[name] = factory
