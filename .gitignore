@@ -1,13 +1,4 @@
-# local env / venv
-.venv/
+.python-version
+.venv
+__pycache__
 .env
-
-# bytecode / caches
-__pycache__/
-*.pyc
-
-# run artifacts
-runs/
-
-# OS junk
-.DS_Store

@@ -1,16 +1,12 @@
-# stages.py  — cleaned imports + safe type hints (no circular imports)
-
 from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, Protocol, Callable
 
-from typing import Any, Dict, Optional, Protocol, Callable, List, TYPE_CHECKING
-
-# <<< ADDED: import only the data structures we need at runtime
 from utils import StageResult
 
-# <<< ADDED: import types only for type checking (no runtime import => avoids cycles)
-if TYPE_CHECKING:
-    from models import Model
-    from dataset import Example
+from dataset import Example  # Assuming dataset.py is in the same directory
+from models import Model
+# from pipeline import pipeline
 
 # -------------------------
 # Gate policies (early exit)
