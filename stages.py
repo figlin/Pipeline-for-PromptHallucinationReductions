@@ -220,10 +220,10 @@ class ConfidenceCheckStage:
             evidence["is_confident"] = is_confident
             evidence["admits_wrong"] = admits_wrong
             
-            # Return the previous answer, this stage doesn't change the answer
+            # Return the model's confidence response, not the previous answer
             return StageResult(
                 stage_id=self.id, 
-                answer=prev_ans, 
+                answer=response, 
                 should_exit=False,
                 evidence=evidence,
                 model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__}
@@ -231,7 +231,7 @@ class ConfidenceCheckStage:
         except Exception as e:
             return StageResult(
                 stage_id=self.id, 
-                answer=prev_ans, 
+                answer=prev_ans,  # Keep previous answer on error
                 should_exit=False,
                 evidence={"prompt": prompt, "error": str(e)},
                 model_usage={"model": getattr(self.model, "name", "unknown")}

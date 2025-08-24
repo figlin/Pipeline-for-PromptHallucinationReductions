@@ -6,7 +6,7 @@ import sys
 from dotenv import load_dotenv
 
 from dataset import dataset, load_from_csv  # Assuming dataset.py is in the same directory
-from models import Model, ScaleDownWrappedModel, GeminiModel, OllamaModel
+from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
 
 load_dotenv()
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
     
     # Model type configuration from env
-    TARGET_MODEL_TYPE = os.getenv("TARGET_MODEL_TYPE", "ollama")  # ollama, gemini, scaledown
+    TARGET_MODEL_TYPE = os.getenv("TARGET_MODEL_TYPE", "ollama")  # ollama, gemini, scaledown, scaledown-llm
     HELPER_MODEL_TYPE = os.getenv("HELPER_MODEL_TYPE", "ollama")
     JUDGE_MODEL_TYPE = os.getenv("JUDGE_MODEL_TYPE", "ollama")
     
@@ -64,7 +64,7 @@ if __name__ == "__main__":
                 default_params={"temperature": temp}
             )
         elif model_type == "scaledown":
-            # ScaleDown can wrap any base model - defaults to Gemini
+            # ScaleDown compression wrapper - can wrap any base model - defaults to Gemini
             base_model_type = os.getenv(f"{role.upper()}_BASE_MODEL", "gemini")  # gemini or ollama
             
             if base_model_type == "gemini":
@@ -84,10 +84,22 @@ if __name__ == "__main__":
                 raise ValueError(f"Unknown base model type for ScaleDown: {base_model_type}")
                 
             rate = float(os.getenv(f"SD_RATE_{role.upper()}", "0.7"))
-            return ScaleDownWrappedModel(
+            return ScaleDownCompressionWrapper(
                 base=base_model,
                 api_key=SCALEDOWN_API_KEY,
                 rate=rate,
+            )
+        elif model_type == "scaledown-llm":
+            # ScaleDown LLM wrapper - direct LLM prompting via ScaleDown API
+            sd_model = os.getenv(f"SD_LLM_MODEL_{role.upper()}", "gpt-4o")  # Default to GPT-4o
+            rate = float(os.getenv(f"SD_LLM_RATE_{role.upper()}", "0.7"))
+            temp = 0.2 if role == "helper" else 0.0
+            
+            return ScaleDownLLMWrapper(
+                api_key=SCALEDOWN_API_KEY,
+                model=sd_model,
+                rate=rate,
+                default_params={"temperature": temp}
             )
         else:
             raise ValueError(f"Unknown model type: {model_type}")

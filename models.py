@@ -27,15 +27,15 @@ class EchoModel:
 
 
 # -------------------------
-# Scaledown Wrapper for API usage
+# ScaleDown Compression Wrapper for API usage
 # -------------------------
 
-class ScaleDownWrappedModel:
+class ScaleDownCompressionWrapper:
     """
     Wraps a base Model and compresses the prompt via ScaleDown before calling base.generate().
     If ScaleDown fails, it falls back to the original prompt.
     """
-    name = "scaledown-wrapper"
+    name = "scaledown-compression-wrapper"
 
     def __init__(
         self,
@@ -129,8 +129,115 @@ class ScaleDownWrappedModel:
             }
         }
         resp.meta["base_model_name"] = getattr(self.base, "name", "unknown")
-        self.name = f"scaledown({resp.meta['base_model_name']})"
+        self.name = f"scaledown-compression({resp.meta['base_model_name']})"
         return resp
+
+# -------------------------
+# ScaleDown LLM Wrapper (Direct LLM prompting via ScaleDown)
+# -------------------------
+
+class ScaleDownLLMWrapper:
+    """
+    Direct ScaleDown LLM wrapper that prompts LLMs through the ScaleDown API.
+    Uses the /compress endpoint for actual LLM prompting, not just compression.
+    Based on the testAPI.py framework.
+    """
+    
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o",
+        rate: float = 0.7,
+        endpoint: str = "https://api.scaledown.xyz/compress",
+        timeout: float = 30.0,
+        default_params: Optional[Dict[str, Any]] = None,
+    ):
+        self.api_key = api_key
+        self.model = model
+        self.rate = rate
+        self.endpoint = endpoint
+        self.timeout = timeout
+        self.default_params = default_params or {}
+        self.name = f"scaledown-llm({model})"
+    
+    def generate(self, prompt: str, **kwargs) -> ModelResponse:
+        """Generate response using ScaleDown's LLM endpoint"""
+        params = {**self.default_params, **kwargs}
+        context = params.get("context", "")
+        
+        # Headers
+        headers = {
+            'x-api-key': self.api_key,
+            'Content-Type': 'application/json'
+        }
+        
+        # Convert rate to float if it's a string
+        rate_value = self.rate
+        if isinstance(rate_value, str) and rate_value.replace('.', '').isdigit():
+            rate_value = float(rate_value)
+        
+        # Payload format that works with ScaleDown
+        payload = {
+            "prompt": prompt,
+            "model": self.model,
+            "rate": rate_value,
+            "context": context  # Always include context, even if empty
+        }
+        
+        try:
+            # Debug logging
+            print(f"[DEBUG] ScaleDown LLM Request:")
+            print(f"  Endpoint: {self.endpoint}")
+            print(f"  Payload: {json.dumps(payload, indent=2)}")
+            
+            response = requests.post(
+                self.endpoint, 
+                headers=headers, 
+                data=json.dumps(payload),
+                timeout=self.timeout
+            )
+            
+            print(f"[DEBUG] ScaleDown Response Status: {response.status_code}")
+            print(f"[DEBUG] ScaleDown Response: {response.text[:500]}...")
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"ScaleDown LLM HTTP {response.status_code}: {response.text}")
+            
+            result = response.json()
+            
+            # Check for errors in response
+            if "detail" in result and ("error" in str(result["detail"]).lower() or "failed" in str(result["detail"]).lower()):
+                raise RuntimeError(f"ScaleDown LLM error: {result['detail']}")
+            
+            # Extract the response text - try different possible keys
+            text = ""
+            for key in ["response", "text", "output", "completion", "generated_text"]:
+                if key in result and isinstance(result[key], str) and result[key].strip():
+                    text = result[key].strip()
+                    break
+            
+            if not text:
+                raise RuntimeError(f"ScaleDown LLM returned no usable text: {result}")
+            
+            # Estimate token counts (ScaleDown might not provide these)
+            prompt_tokens = result.get("prompt_tokens", max(1, len(prompt)//4))
+            completion_tokens = result.get("completion_tokens", max(1, len(text)//4))
+            
+            return ModelResponse(
+                text=text,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=(prompt_tokens + completion_tokens) * 1e-6,  # rough estimate
+                meta={
+                    "status": response.status_code,
+                    "scaledown_model": self.model,
+                    "scaledown_rate": rate_value,
+                    "full_response": result
+                }
+            )
+            
+        except Exception as e:
+            raise RuntimeError(f"ScaleDown LLM generation failed: {str(e)}")
 
 # -------------------------
 # Gemini API model

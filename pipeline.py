@@ -20,7 +20,8 @@ class Pipeline:
         judge_for_gate: Optional[Model] = None,
         do_token_diffs: bool = True,
         debug: bool = False,            # <-- new
-        debug_maxlen: int = 220         # <-- new
+        debug_maxlen: int = 220,        # <-- new
+        keep_context: bool = True       # <-- new: keep context throughout singular question
     ):
         self.stages = stages
         self.gate = gate
@@ -28,6 +29,7 @@ class Pipeline:
         self.do_token_diffs = do_token_diffs
         self.debug = debug
         self.debug_maxlen = debug_maxlen
+        self.keep_context = keep_context
 
     def _dbg(self, *parts):
         if self.debug:
@@ -48,6 +50,11 @@ class Pipeline:
             self._dbg(f"\n-- Stage {getattr(stage,'id','?')} ({stage.__class__.__name__}) --")
 
             res = stage.run(ex, ctx)
+            
+            # Persist stage context if keep_context is enabled
+            if self.keep_context and res.evidence:
+                stage_ctx_key = f"stage_{getattr(stage,'id','?')}"
+                ctx[stage_ctx_key] = res.evidence
             trace.stage_results.append(res)
 
             # Debug: show prompt/evidence/errors
@@ -198,7 +205,8 @@ def build_pipeline(
         stages=stages,
         gate=gate,
         judge_for_gate=gate_judge,
-        do_token_diffs=bool(config.get("token_diffs", True))
+        do_token_diffs=bool(config.get("token_diffs", True)),
+        keep_context=bool(config.get("keep_context", True))  # Default to True
     )
 
 DEFAULT_TEMPLATES = {
@@ -233,9 +241,7 @@ DEFAULT_TEMPLATES = {
         "Return PASS <p=...> or FAIL <p=...>."
     ),
     "confidence_check": (
-        "You have answered incorrectly in previous stages. The correct answer is '{correct_answer}'.\n"
-        "Your previous answer was: '{previous_answer}'\n"
-        "Question: {question}\n\n"
+        "You have passed through all stages of prompt optimization, your answer may or may not be correct. \n"
         "Please respond with exactly one of these two options:\n"
         "1. 'My last answer was correct, I am confident in it.'\n"
         "2. 'I was wrong and do not know the answer.'"
