@@ -3,7 +3,6 @@
 This repository implements a modular pipeline for reducing prompt hallucinations in LLM answers using composable stages such as baseline ask, prompt optimization, chain-of-verification, self-correction, and external judgment. The pipeline is model-agnostic and supports ScaleDown prompt compression. It is designed to be easy to extend, debug, and evaluate.
 
 ## Features
-
 - **Composable Stages**: Baseline, APO (prompt rewrite), CoVe (Chain-of-Verification), Self-correct, Judge, and more.
 - **Early Exit Policies**: Oracle or LLM-based gates for efficiency.
 - **Model Agnostic**: Easily plug in different LLM backends or adapters.
