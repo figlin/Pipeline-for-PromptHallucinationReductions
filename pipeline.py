@@ -48,6 +48,17 @@ class Pipeline:
                 ctx["last_answer"] = last_answer
 
             self._dbg(f"\n-- Stage {getattr(stage,'id','?')} ({stage.__class__.__name__}) --")
+            
+            # Debug: show context flowing into this stage
+            if self.debug and ctx:
+                self._dbg("Context keys:", list(ctx.keys()))
+                if "last_answer" in ctx:
+                    last_ans_snip = ctx["last_answer"][:self.debug_maxlen] + ("..." if len(ctx["last_answer"]) > self.debug_maxlen else "")
+                    self._dbg("Last answer:", last_ans_snip)
+                # Show other stage contexts if available
+                stage_contexts = [k for k in ctx.keys() if k.startswith("stage_")]
+                if stage_contexts:
+                    self._dbg("Available stage contexts:", stage_contexts)
 
             res = stage.run(ex, ctx)
             
@@ -55,6 +66,8 @@ class Pipeline:
             if self.keep_context and res.evidence:
                 stage_ctx_key = f"stage_{getattr(stage,'id','?')}"
                 ctx[stage_ctx_key] = res.evidence
+                if self.debug:
+                    self._dbg(f"Stored context key: {stage_ctx_key} (evidence keys: {list(res.evidence.keys())})")
             trace.stage_results.append(res)
 
             # Debug: show prompt/evidence/errors

@@ -31,7 +31,7 @@ class EvalResult (BaseModel):
     mc_accuracy: float = 0.0
 
 class Dataset:
-    def __init__(self, source: Union[str, List[Dict[str, Any]]]):
+    def __init__(self, source: Union[str, List[Dict[str, Any]]], range_filter: Optional[str] = None):
         self.examples: List[Example] = []
         self.schema: Optional[str] = None
 
@@ -42,7 +42,7 @@ class Dataset:
         else:
             raise ValueError("Source must be a list of dicts or a path string")
 
-        self._load(raw_data)
+        self._load(raw_data, range_filter)
 
     def _load_from_file(self, path: str) -> List[Dict[str, Any]]:
         path_obj = Path(path)
@@ -60,11 +60,22 @@ class Dataset:
             ds = ds_dict[first_split]
             return ds.to_list()
 
-    def _load(self, raw_data: List[Dict[str, Any]]):
+    def _load(self, raw_data: List[Dict[str, Any]], range_filter: Optional[str] = None):
         if not raw_data:
             return
 
-        keys = set(raw_data[0].keys())
+        # Apply range filter if provided
+        if range_filter:
+            try:
+                start, end = map(int, range_filter.split('-'))
+                # Convert to 0-based indexing
+                start_idx = max(0, start - 1)
+                end_idx = min(len(raw_data), end)
+                raw_data = raw_data[start_idx:end_idx]
+            except (ValueError, AttributeError):
+                print(f"Warning: Invalid DATASET_RANGE format '{range_filter}'. Expected format: 'start-end' (e.g., '1-50'). Using full dataset.")
+
+        keys = set(raw_data[0].keys()) if raw_data else set()
         for name, schema in SCHEMA_REGISTRY.items():
             if schema["keys"] <= keys:
                 self.schema = name
@@ -100,3 +111,13 @@ class Dataset:
 
     def __getitem__(self, idx: int) -> Example:
         return self.examples[idx]
+
+
+def load_from_csv(csv_path: str, range_filter: Optional[str] = None) -> Dataset:
+    """Load dataset from a CSV file."""
+    return Dataset(csv_path, range_filter)
+
+
+# Create a default dataset instance for internal use
+# You can modify this to load a specific internal dataset
+dataset = Dataset([])

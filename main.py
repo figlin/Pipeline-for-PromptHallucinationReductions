@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from dataset import dataset, load_from_csv  # Assuming dataset.py is in the same directory
+from dataset import Dataset, dataset, load_from_csv
 from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
 
@@ -139,12 +139,16 @@ if __name__ == "__main__":
     
     # Load dataset based on environment variable
     dataset_path = os.getenv("DATASET_PATH", "internal")
+    dataset_range = os.getenv("DATASET_RANGE", "")
+    
     if dataset_path.lower() == "internal":
         dataset_to_run = dataset
         print("Running with internal dataset.")
     else:
         print(f"Running with dataset from: {dataset_path}")
-        dataset_to_run = load_from_csv(dataset_path)
+        if dataset_range:
+            print(f"Using dataset range: {dataset_range}")
+        dataset_to_run = load_from_csv(dataset_path, dataset_range if dataset_range else None)
 
     if not dataset_to_run:
         print(f"Error: No data loaded from '{dataset_path}'. Exiting.", file=sys.stderr)

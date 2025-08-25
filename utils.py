@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import json
 import re
-from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
-from dataset import QAResponse
+if TYPE_CHECKING:
+    from dataset import QAResponse
 @dataclass
 class Example:
     """Use y_true only in offline eval. In production, omit it."""
@@ -77,6 +79,7 @@ def f1_score(pred: str, truth: str) -> float:
 
 def parse_llm_response(llm_output: str) -> Optional[QAResponse]:
     try:
+        from dataset import QAResponse  # Import here to avoid circular import
         data = json.loads(llm_output)
         return QAResponse(**data)
     except Exception as e:
