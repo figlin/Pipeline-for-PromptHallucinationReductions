@@ -5,7 +5,8 @@ import sys
 
 from dotenv import load_dotenv
 
-from dataset import Dataset, dataset, load_from_csv
+from dataset import EvalResult, dataset, load_from_csv
+from evaluate import Evaluator
 from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
 
@@ -154,10 +155,24 @@ if __name__ == "__main__":
         print(f"Error: No data loaded from '{dataset_path}'. Exiting.", file=sys.stderr)
         sys.exit(1)
 
+    evaluator = Evaluator(dataset=dataset_to_run)
+    total = EvalResult()
     for ex in dataset_to_run:
         trace = pipe.run_one(ex)
+        result=evaluator._evaluate_example(
+            pred=trace.final_answer,
+            golds=[ex.y_true] if evaluator.dataset.schema == 'simpleqa' else ex.correct_answers, 
+        )
         print(f"[{ex.qid}] Q: {ex.question}")
         print("  Final:", trace.final_answer)
+        print(" Result", result.model_dump())
+        total.n += result.n
+        total.em += result.em
+        total.f1 += result.f1
+        total.rouge1 += result.rouge1
+        total.bleurt += result.bleu1
+        total.llm_judge += result.llm_judge
+
         exit_technique = "Completed All Stages"
         if trace.early_exit_at:
             if trace.early_exit_at.startswith("gate_after:"):
@@ -167,11 +182,18 @@ if __name__ == "__main__":
                 exit_technique = f"Stage Exit at {get_stage_technique(trace.early_exit_at, config['stages'])}"
         print("  Exit at:", exit_technique)
         print("  Tokens:", trace.total_tokens)
-        if ex.y_true:
-            is_correct = trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower()
-            print("  Correct:", is_correct)
-        print("-" * 50)
+        # if ex.y_true:
+        #     is_correct = trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower()
+        #     print("  Correct:", is_correct)
+
+    total.em /= total.n
+    total.f1 /= total.n
+    total.rouge1 /= total.n
+    total.bleurt /= total.n
+    total.llm_judge /= total.n
+    total.mc_accuracy /= total.n
+    print("Final Report: ", total.model_dump())
+    print("-" * 50)
     
     if 'trace' in locals() and trace:
         print("Final:", trace.final_answer, "Exit at:", trace.early_exit_at, "Tokens:", trace.total_tokens)
-
