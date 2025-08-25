@@ -1,6 +1,9 @@
+import json
+import re
 from __future__ import annotations
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 @dataclass
 class Example:
@@ -41,3 +44,53 @@ class RunTrace:
     total_cost: float = 0.0
     timing_sec: float = 0.0
     artifacts: Dict[str, Any] = field(default_factory=dict)  # e.g., diffs, prompts, raw json
+
+def normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+def safe_list(val: Union[str, List[str]]) -> List[str]:
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        # handle semicolon-separated fields
+        parts = [v.strip() for v in val.split(";") if v.strip()]
+        return parts
+    return []
+
+# metrics
+def f1_score(pred: str, truth: str) -> float:
+    """Token overlap F1 for SimpleQA"""
+    pred_tokens = pred.split()
+    truth_tokens = truth.split()
+    common = Counter(pred_tokens) & Counter(truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0.0
+    precision = num_same / len(pred_tokens)
+    recall = num_same / len(truth_tokens)
+    return (2 * precision * recall) / (precision + recall)
+
+def parse_llm_response(llm_output: str) -> Optional[QAResponse]:
+    try:
+        data = json.loads(llm_output)
+        return QAResponse(**data)
+    except Exception as e:
+        print("Parsing failed:", e)
+        return None
+    
+SCHEMA_REGISTRY = {
+    "simpleqa": {
+        "keys": {"answer", "problem"},
+        "parser": "_parse_simpleqa",
+        "id_keys": ["problem", "metadata"],   # ← use both for unique ID
+    },
+    "truthfulqa": {
+        "keys": {"Best Answer", "Question"},
+        "parser": "_parse_truthfulqa",
+        "id_keys": ["Question", "Category"],  # ← combine these
+    },
+}
