@@ -6,7 +6,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 from dataset import QAResponse
- # Assuming dataset.py is in the same directory
+@dataclass
+class Example:
+    """Use y_true only in offline eval. In production, omit it."""
+    qid: str
+    question: str
+    y_true: Optional[str] = None
+
+# Assuming dataset.py is in the same directory
 # -------------------------
 # Core data structures
 # -------------------------
@@ -18,13 +25,6 @@ class ModelResponse:
     completion_tokens: int = 0
     cost: float = 0.0
     meta: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class Example:
-    """Use y_true only in offline eval. In production, omit it."""
-    qid: str
-    question: str
-    y_true: Optional[str] = None
 
 @dataclass
 class StageResult:
