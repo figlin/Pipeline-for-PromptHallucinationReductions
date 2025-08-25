@@ -170,7 +170,7 @@ if __name__ == "__main__":
         total.em += result.em
         total.f1 += result.f1
         total.rouge1 += result.rouge1
-        total.bleurt += result.bleu1
+        total.bleurt += result.bleurt
         total.llm_judge += result.llm_judge
 
         exit_technique = "Completed All Stages"
