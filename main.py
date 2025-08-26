@@ -111,6 +111,8 @@ if __name__ == "__main__":
         "judge": create_model(JUDGE_MODEL_TYPE, "judge"),
     }
 
+    DEBUG_CONTEXT = os.getenv("PIPE_DEBUG_CONTEXT", "0") not in ("0", "", "false", "False", "FALSE")
+    
     config = {
         "stages": [
             {"type":"baseline","id":"s0","model":"target"}, # Target model baseline
@@ -121,7 +123,8 @@ if __name__ == "__main__":
             # {"type":"judge","id":"s5","judge":"judge","exit_on_pass": True, "threshold": 0.8}
         ],
         "gate": {"mode": "oracle"},
-        "token_diffs": True
+        "token_diffs": True,
+        "debug_context": DEBUG_CONTEXT
     }
 
     DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")
@@ -159,9 +162,17 @@ if __name__ == "__main__":
     total = EvalResult()
     for ex in dataset_to_run:
         trace = pipe.run_one(ex)
+        # Use correct_answers for all datasets - SimpleQA populates this correctly
+        golds = ex.correct_answers if ex.correct_answers else [ex.y_true]
+        
+        # Debug output
+        if DEBUG:
+            print(f"[DEBUG] Evaluating: pred='{trace.final_answer}' vs golds={golds}")
+            print(f"[DEBUG] Schema: {evaluator.dataset.schema}, ex.y_true='{ex.y_true}', ex.correct_answers={ex.correct_answers}")
+        
         result=evaluator._evaluate_example(
             pred=trace.final_answer,
-            golds=[ex.y_true] if evaluator.dataset.schema == 'simpleqa' else ex.correct_answers, 
+            golds=golds,
         )
         print(f"[{ex.qid}] Q: {ex.question}")
         print("  Final:", trace.final_answer)
@@ -170,7 +181,7 @@ if __name__ == "__main__":
         total.em += result.em
         total.f1 += result.f1
         total.rouge1 += result.rouge1
-        total.bleurt += result.bleu1
+        total.bleu1 += result.bleu1
         total.llm_judge += result.llm_judge
 
         exit_technique = "Completed All Stages"
@@ -189,7 +200,7 @@ if __name__ == "__main__":
     total.em /= total.n
     total.f1 /= total.n
     total.rouge1 /= total.n
-    total.bleurt /= total.n
+    total.bleu1 /= total.n
     total.llm_judge /= total.n
     total.mc_accuracy /= total.n
     print("Final Report: ", total.model_dump())
