@@ -26,7 +26,7 @@ class EvalResult (BaseModel):
     em: float = 0.0
     f1: float = 0.0
     rouge1: float = 0.0
-    bleu1: float = 0.0
+    bleurt: float = 0.0
     llm_judge: float = 0.0
     mc_accuracy: float = 0.0
 
