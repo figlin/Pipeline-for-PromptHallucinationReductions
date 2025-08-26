@@ -220,10 +220,10 @@ class ConfidenceCheckStage:
             evidence["is_confident"] = is_confident
             evidence["admits_wrong"] = admits_wrong
             
-            # Return the model's confidence response, not the previous answer
+            # Return the previous answer, not the confidence response (confidence is in evidence)
             return StageResult(
                 stage_id=self.id, 
-                answer=response, 
+                answer=prev_ans,  # Keep the previous answer as the final answer
                 should_exit=False,
                 evidence=evidence,
                 model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__}

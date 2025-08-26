@@ -22,7 +22,9 @@ class Pipeline:
         debug: bool = False,            # <-- new
         debug_maxlen: int = 220,        # <-- new
         debug_context: bool = False,    # <-- new: debug all context values
-        keep_context: bool = True       # <-- new: keep context throughout singular question
+        keep_context: bool = True,      # <-- new: keep context throughout singular question
+        evaluator: Optional[object] = None,  # <-- new: evaluator for per-stage evaluation
+        evaluate_all_stages: bool = False    # <-- new: enable per-stage evaluation
     ):
         self.stages = stages
         self.gate = gate
@@ -32,6 +34,8 @@ class Pipeline:
         self.debug_maxlen = debug_maxlen
         self.debug_context = debug_context
         self.keep_context = keep_context
+        self.evaluator = evaluator
+        self.evaluate_all_stages = evaluate_all_stages
 
     def _dbg(self, *parts):
         if self.debug:
@@ -139,6 +143,16 @@ class Pipeline:
             if res.answer is not None:
                 ans_snip = res.answer[:self.debug_maxlen] + ("..." if len(res.answer) > self.debug_maxlen else "")
                 self._dbg("Answer:", ans_snip)
+                
+                # Per-stage evaluation (skip confidence check stages)
+                if self.evaluate_all_stages and self.evaluator and stage.__class__.__name__ != "ConfidenceCheckStage":
+                    golds = ex.correct_answers if ex.correct_answers else [ex.y_true] if ex.y_true else []
+                    if golds:
+                        stage_eval = self.evaluator._evaluate_example(pred=res.answer, golds=golds)
+                        res.evidence = res.evidence or {}
+                        res.evidence["stage_eval"] = stage_eval.model_dump()
+                        self._dbg(f"Stage Eval: EM={stage_eval.em:.3f}, F1={stage_eval.f1:.3f}, ROUGE1={stage_eval.rouge1:.3f}, LLM_Judge={stage_eval.llm_judge:.3f}")
+                
                 if self.do_token_diffs and last_answer:
                     diff = list(difflib.unified_diff(last_answer.split(), res.answer.split(), lineterm=""))
                     trace.artifacts[f"diff_{stage.id}"] = " ".join(diff[:4000])
@@ -171,6 +185,7 @@ class Pipeline:
 def build_pipeline(
     config: Dict[str, Any],
     models: Dict[str, Model],
+    evaluator: Optional[object] = None,
 ) -> Pipeline:
     # Gate
     gate_cfg = config.get("gate", {"mode": "none"})
@@ -240,7 +255,9 @@ def build_pipeline(
         judge_for_gate=gate_judge,
         do_token_diffs=bool(config.get("token_diffs", True)),
         debug_context=bool(config.get("debug_context", False)),
-        keep_context=bool(config.get("keep_context", True))  # Default to True
+        keep_context=bool(config.get("keep_context", True)),  # Default to True
+        evaluator=evaluator,
+        evaluate_all_stages=bool(config.get("evaluate_all_stages", False))
     )
 
 DEFAULT_TEMPLATES = {

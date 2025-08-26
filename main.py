@@ -9,6 +9,7 @@ from dataset import EvalResult, dataset, load_from_csv
 from evaluate import Evaluator
 from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
+from utils import normalize_text
 
 load_dotenv()
 
@@ -124,7 +125,8 @@ if __name__ == "__main__":
         ],
         "gate": {"mode": "oracle"},
         "token_diffs": True,
-        "debug_context": DEBUG_CONTEXT
+        "debug_context": DEBUG_CONTEXT,
+        "evaluate_all_stages": True  # Enable per-stage evaluation
     }
 
     DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")
@@ -134,11 +136,6 @@ if __name__ == "__main__":
     print(f"Helper: {models['helper'].name}")
     print(f"Judge: {models['judge'].name}")
     print()
-
-    pipe = build_pipeline(config, models)
-    # re-wrap with debug (or pass debug into a factory if you prefer)
-    pipe.debug = DEBUG
-    pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN") or "220")
 
     
     # Load dataset based on environment variable
@@ -158,7 +155,13 @@ if __name__ == "__main__":
         print(f"Error: No data loaded from '{dataset_path}'. Exiting.", file=sys.stderr)
         sys.exit(1)
 
-    evaluator = Evaluator(dataset=dataset_to_run)
+    evaluator = Evaluator(dataset=dataset_to_run, llm_judge_model=models.get("judge"))
+    
+    pipe = build_pipeline(config, models, evaluator)
+    # re-wrap with debug (or pass debug into a factory if you prefer)
+    pipe.debug = DEBUG
+    pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN") or "220")
+    
     total = EvalResult()
     for ex in dataset_to_run:
         trace = pipe.run_one(ex)
@@ -169,6 +172,7 @@ if __name__ == "__main__":
         if DEBUG:
             print(f"[DEBUG] Evaluating: pred='{trace.final_answer}' vs golds={golds}")
             print(f"[DEBUG] Schema: {evaluator.dataset.schema}, ex.y_true='{ex.y_true}', ex.correct_answers={ex.correct_answers}")
+            print(f"[DEBUG] Normalized pred: '{normalize_text(trace.final_answer)}' vs normalized golds: {[normalize_text(g) for g in golds]}")
         
         result=evaluator._evaluate_example(
             pred=trace.final_answer,
@@ -200,7 +204,7 @@ if __name__ == "__main__":
     total.em /= total.n
     total.f1 /= total.n
     total.rouge1 /= total.n
-    total.bleu1 /= total.n
+    total.bleurt /= total.n
     total.llm_judge /= total.n
     total.mc_accuracy /= total.n
     print("Final Report: ", total.model_dump())
