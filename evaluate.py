@@ -66,13 +66,21 @@ class Evaluator:
         if "em" in allowed_metrics:
             result.em = max(self.exact_match.compute([pred], [g]) for g in golds) if golds else 0.0
         if "f1" in allowed_metrics:
-            result.f1 = max(self.f1_score.compute([pred], [g]) for g in golds) if golds else 0.0
+            safe_golds = [g for g in golds if isinstance(g, str) and g]
+            safe_pred = pred if isinstance(pred, str) and pred else ""
+            result.f1 = max(self.f1_score.compute([safe_pred], [g]) for g in safe_golds) if safe_golds else 0.0
         if "rouge1" in allowed_metrics:
-            result.rouge1 = max(self.rouge1_metric.compute([pred], [g]) for g in golds) if golds else 0.0
+            safe_golds = [g for g in golds if isinstance(g, str) and g]
+            safe_pred = pred if isinstance(pred, str) and pred else ""
+            result.rouge1 = max(self.rouge1_metric.compute([safe_pred], [g]) for g in safe_golds) if safe_golds else 0.0
         if "bleurt" in allowed_metrics:
-            result.bleurt = max(self.bleurt_metric.compute([pred], [g]) for g in golds) if golds else 0.0
+            safe_golds = [g for g in golds if isinstance(g, str) and g]
+            safe_pred = pred if isinstance(pred, str) and pred else ""
+            result.bleurt = max(self.bleurt_metric.compute([safe_pred], [g]) for g in safe_golds) if safe_golds else 0.0
         if "llm_judge" in allowed_metrics:
-            result.llm_judge = max(self._llm_score(pred, g) for g in golds) if golds else 0.0
+            safe_golds = [g for g in golds if isinstance(g, str) and g]
+            safe_pred = pred if isinstance(pred, str) and pred else ""
+            result.llm_judge = max(self._llm_score(safe_pred, g) for g in safe_golds) if safe_golds else 0.0
         if "mc_accuracy" in allowed_metrics and is_mc:
             result.mc_accuracy = 1.0 if pred in golds else 0.0
 

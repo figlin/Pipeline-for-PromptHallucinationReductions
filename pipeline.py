@@ -244,23 +244,23 @@ def build_pipeline(
     )
 
 DEFAULT_TEMPLATES = {
-    "baseline": "Answer in one word or phrase only.\n\nQ: {question}\nA:",
+    "baseline": "Q: {question}\nA:",
     "apo_rewrite": (
         "Rewrite the user question into a concise, specific prompt that reduces ambiguity "
         "and includes constraints to avoid hallucinations. Output only the rewritten prompt.\n\nQ: {question}"
     ),
-    "apo_target": "Answer in one word or phrase only.\n\n{optimized_prompt}",
+    "apo_target": "{optimized_prompt}",
     "cove": (
-        "Answer in one word or phrase only. Verify the answer's factuality first.\n"
+        "Verify the prior answer's factuality first, then provide the best final answer.\n"
         "Question: {question}\n"
         "Prior answer: {prior_answer}\n"
-        "Give only the corrected final answer."
+        "Final answer:"
     ),
     "self_correct": (
-        "Answer in one word or phrase only. Fix any factual errors.\n"
+        "Fix any factual errors in the previous answer and provide a corrected final answer.\n"
         "Question: {question}\n"
         "Current answer: {prior_answer}\n"
-        "Return only the corrected answer."
+        "Final answer:"
     ),
     "judge": (
         "You are a strict fact-checking judge.\n"
