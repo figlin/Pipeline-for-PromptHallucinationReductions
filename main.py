@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from dataset import AggregatedMetrics, EvalResult, dataset, load_from_csv
+from dataset import AggregatedMetrics, dataset, load_from_csv
 from evaluate import Evaluator
 from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
