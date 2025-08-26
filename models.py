@@ -148,7 +148,7 @@ class ScaleDownLLMWrapper:
         api_key: str,
         model: str = "gpt-4o",
         rate: float = 0.7,
-        endpoint: str = "https://api.scaledown.xyz/compress",
+        endpoint: str = "https://api.scaledown.xyz/compress/raw",
         timeout: float = 30.0,
         default_params: Optional[Dict[str, Any]] = None,
     ):
@@ -178,9 +178,9 @@ class ScaleDownLLMWrapper:
         
         # Payload format that works with ScaleDown (matching testAPI.py format)
         payload = {
-            "context": context,
             "prompt": prompt,
             "model": self.model,
+            "context": context,  # Always include context, even if empty
             "scaledown": {
                 "rate": rate_value
             }
@@ -193,10 +193,10 @@ class ScaleDownLLMWrapper:
             print(f"  Payload: {json.dumps(payload, indent=2)}")
             
             response = requests.post(
-                self.endpoint, 
+                url=self.endpoint, 
                 headers=headers, 
                 data=json.dumps(payload),
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             
             print(f"[DEBUG] ScaleDown Response Status: {response.status_code}")
