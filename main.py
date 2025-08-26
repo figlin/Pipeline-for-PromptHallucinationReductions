@@ -123,7 +123,6 @@ if __name__ == "__main__":
             {"type":"apo","id":"s1","helper":"helper","target":"target"}, # Helper rewrites, target answers
             {"type":"cove","id":"s2","model":"target"}, # Target model verification
             {"type":"self_correct","id":"s3","model":"target"}, # Target model self-correction
-            # confidence_check removed to allow raw model outputs
             # {"type":"judge","id":"s5","judge":"judge","exit_on_pass": True, "threshold": 0.8}
         ],
         "gate": {"mode": "oracle"},
@@ -163,26 +162,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     evaluator = Evaluator(dataset=dataset_to_run)
-<<<<<<< Updated upstream
     total = EvalResult()
-=======
-    metrics_handler = AggregatedMetrics()
-    # map stage id -> type for readable output
-    stage_id_to_type = {s.get("id"): s.get("type") for s in config["stages"]}
-
-    # ensure logs directory exists
-    logs_dir = Path("logs")
-    logs_dir.mkdir(parents=True, exist_ok=True)
-
-    # create a single log file per run (JSON Lines)
-    run_ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_log_path = logs_dir / f"run-{run_ts}.jsonl"
-    print(f"Logging to: {run_log_path}")
-
-    # console verbosity for per-stage output: none | summary | full
-    STAGE_CONSOLE = os.getenv("PIPE_STAGE_CONSOLE", "summary").lower()
-
->>>>>>> Stashed changes
     for ex in dataset_to_run:
         trace = pipe.run_one(ex)
         # Use correct_answers for all datasets - SimpleQA populates this correctly
@@ -216,56 +196,6 @@ if __name__ == "__main__":
                 exit_technique = f"Stage Exit at {get_stage_technique(trace.early_exit_at, config['stages'])}"
         print("  Exit at:", exit_technique)
         print("  Tokens:", trace.total_tokens)
-<<<<<<< Updated upstream
-=======
-
-        # Per-stage console output (based on verbosity)
-        if STAGE_CONSOLE in ("summary", "full"):
-            for res in trace.stage_results:
-                stype = stage_id_to_type.get(res.stage_id, "?")
-                if STAGE_CONSOLE == "summary":
-                    # concise one-liner per stage
-                    mu = res.model_usage or {}
-                    if "prompt_tokens" in mu or "completion_tokens" in mu:
-                        pt, ct = mu.get("prompt_tokens"), mu.get("completion_tokens")
-                        model = mu.get("model")
-                    else:
-                        # nested usage
-                        sub_any = next(iter(mu.values()), {}) if isinstance(mu, dict) and mu else {}
-                        pt, ct = (sub_any or {}).get("prompt_tokens"), (sub_any or {}).get("completion_tokens")
-                        model = (sub_any or {}).get("model")
-                    ans_snip = (res.answer or "").strip()
-                    if len(ans_snip) > 120:
-                        ans_snip = ans_snip[:117] + "..."
-                    print(f"    - {res.stage_id} [{stype}] model={model} pt={pt} ct={ct} answer={ans_snip}")
-                else:
-                    # full details
-                    print(f"    Stage {res.stage_id} ({stype})")
-                    ev = res.evidence or {}
-                    prompt_snip = ev.get("prompt") or ev.get("helper_in") or ev.get("target_in") or ""
-                    if prompt_snip:
-                        print("      prompt:", prompt_snip)
-                    if "optimized" in ev:
-                        print("      optimized:", ev.get("optimized"))
-                    if res.answer is not None:
-                        print("      answer:", res.answer)
-                    mu = res.model_usage or {}
-                    if mu:
-                        if "prompt_tokens" in mu or "completion_tokens" in mu:
-                            print("      usage:", {k: mu.get(k) for k in ("model","prompt_tokens","completion_tokens")})
-                        else:
-                            for label, sub in mu.items():
-                                if isinstance(sub, dict):
-                                    print(f"      usage.{label}:", {k: sub.get(k) for k in ("model","prompt_tokens","completion_tokens")})
-
-        # Write this example to the single run log file (JSONL)
-        try:
-            with open(run_log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(asdict(trace), ensure_ascii=False) + "\n")
-        except Exception as e:
-            print(f"[warn] failed to append log for {ex.qid}: {e}")
-        
->>>>>>> Stashed changes
         # if ex.y_true:
         #     is_correct = trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower()
         #     print("  Correct:", is_correct)
