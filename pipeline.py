@@ -23,7 +23,8 @@ class Pipeline:
         do_token_diffs: bool = True,
         debug: bool = False,            # <-- new
         debug_maxlen: int = 220,        # <-- new
-        keep_context: bool = True,       # <-- new: keep context throughout singular question
+        debug_context: bool = False,    # <-- new: debug all context values
+        keep_context: bool = True       # <-- new: keep context throughout singular question
     ):
         self.stages = stages
         self.gate = gate
@@ -31,6 +32,7 @@ class Pipeline:
         self.do_token_diffs = do_token_diffs
         self.debug = debug
         self.debug_maxlen = debug_maxlen
+        self.debug_context = debug_context
         self.keep_context = keep_context
         self.evaluator = Evaluator(dataset=dataset)
         self.aggregated_metrics = AggregatedMetrics()
@@ -63,6 +65,24 @@ class Pipeline:
                 stage_contexts = [k for k in ctx.keys() if k.startswith("stage_")]
                 if stage_contexts:
                     self._dbg("Available stage contexts:", stage_contexts)
+            
+            # Debug: show full context values if debug_context is enabled
+            if self.debug_context and ctx:
+                self._dbg("\n--- FULL CONTEXT DEBUG ---")
+                for key, value in ctx.items():
+                    if isinstance(value, dict):
+                        self._dbg(f"{key}: {dict}")
+                        for subkey, subvalue in value.items():
+                            subvalue_str = str(subvalue)
+                            if len(subvalue_str) > self.debug_maxlen:
+                                subvalue_str = subvalue_str[:self.debug_maxlen] + "..."
+                            self._dbg(f"  {subkey}: {subvalue_str}")
+                    else:
+                        value_str = str(value)
+                        if len(value_str) > self.debug_maxlen:
+                            value_str = value_str[:self.debug_maxlen] + "..."
+                        self._dbg(f"{key}: {value_str}")
+                self._dbg("--- END CONTEXT DEBUG ---\n")
 
             res = stage.run(ex, ctx)
             
@@ -232,6 +252,7 @@ def build_pipeline(
         dataset=dataset,
         judge_for_gate=gate_judge,
         do_token_diffs=bool(config.get("token_diffs", True)),
+        debug_context=bool(config.get("debug_context", False)),
         keep_context=bool(config.get("keep_context", True))  # Default to True
     )
 
@@ -267,7 +288,10 @@ DEFAULT_TEMPLATES = {
         "Return PASS <p=...> or FAIL <p=...>."
     ),
     "confidence_check": (
-        "You have passed through all stages of prompt optimization, your answer may or may not be correct. \n"
+        "You have passed through all stages of prompt optimization for this question. "
+        "Your previous answer may or may not be correct.\n\n"
+        "Question: {question}\n"
+        "Your previous answer: {previous_answer}\n\n"
         "Please respond with exactly one of these two options:\n"
         "1. 'My last answer was correct, I am confident in it.'\n"
         "2. 'I was wrong and do not know the answer.'"

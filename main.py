@@ -111,6 +111,8 @@ if __name__ == "__main__":
         "judge": create_model(JUDGE_MODEL_TYPE, "judge"),
     }
 
+    DEBUG_CONTEXT = os.getenv("PIPE_DEBUG_CONTEXT", "0") not in ("0", "", "false", "False", "FALSE")
+    
     config = {
         "stages": [
             {"type":"baseline","id":"s0","model":"target"}, # Target model baseline
@@ -121,7 +123,8 @@ if __name__ == "__main__":
             # {"type":"judge","id":"s5","judge":"judge","exit_on_pass": True, "threshold": 0.8}
         ],
         "gate": {"mode": "oracle"},
-        "token_diffs": True
+        "token_diffs": True,
+        "debug_context": DEBUG_CONTEXT
     }
 
     DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")

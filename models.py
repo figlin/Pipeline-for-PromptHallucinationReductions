@@ -176,13 +176,13 @@ class ScaleDownLLMWrapper:
         if isinstance(rate_value, str) and rate_value.replace('.', '').isdigit():
             rate_value = float(rate_value)
         
-        # Payload format that works with ScaleDown
+        # Payload format that works with ScaleDown (matching testAPI.py format)
         payload = {
             "prompt": prompt,
             "model": self.model,
             "context": context,  # Always include context, even if empty
-            "scaedown": {
-                "rate": rate_value,
+            "scaledown": {
+                "rate": rate_value
             }
         }
         
@@ -211,9 +211,9 @@ class ScaleDownLLMWrapper:
             if "detail" in result and ("error" in str(result["detail"]).lower() or "failed" in str(result["detail"]).lower()):
                 raise RuntimeError(f"ScaleDown LLM error: {result['detail']}")
             
-            # Extract the response text - try different possible keys
+            # Extract the response text - try different possible keys (ScaleDown format)
             text = ""
-            for key in ["response", "text", "output", "completion", "generated_text"]:
+            for key in ["full_response", "compressed_response", "response", "text", "output", "completion", "generated_text"]:
                 if key in result and isinstance(result[key], str) and result[key].strip():
                     text = result[key].strip()
                     break
@@ -221,15 +221,17 @@ class ScaleDownLLMWrapper:
             if not text:
                 raise RuntimeError(f"ScaleDown LLM returned no usable text: {result}")
             
-            # Estimate token counts (ScaleDown might not provide these)
-            prompt_tokens = result.get("prompt_tokens", max(1, len(prompt)//4))
-            completion_tokens = result.get("completion_tokens", max(1, len(text)//4))
+            # Extract token counts from ScaleDown response format
+            usage_info = result.get("full_usage", {})
+            prompt_tokens = usage_info.get("tokens", max(1, len(prompt)//4))
+            completion_tokens = max(1, len(text)//4)  # ScaleDown doesn't separate these
+            cost = usage_info.get("cost", (prompt_tokens + completion_tokens) * 1e-6)
             
             return ModelResponse(
                 text=text,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                cost=(prompt_tokens + completion_tokens) * 1e-6,  # rough estimate
+                cost=cost,
                 meta={
                     "status": response.status_code,
                     "scaledown_model": self.model,
