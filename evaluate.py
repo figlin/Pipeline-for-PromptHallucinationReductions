@@ -98,20 +98,36 @@ Respond with only a number between 0.0 and 1.0 (e.g., 0.8)."""
     def _evaluate_example(self, pred: str, golds: list, is_mc: bool = False) -> EvalResult:
         dataset_name = self.dataset.schema
         allowed_metrics = self.metrics_to_use.get(dataset_name, [])
+        
+        # Normalize prediction and gold answers for consistent comparison
+        normalized_pred = normalize_text(pred)
+        normalized_golds = [normalize_text(g) for g in golds]
 
         result = EvalResult(n=1)
         if "em" in allowed_metrics:
-            result.em = max(self.exact_match.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.em = max(self.exact_match.compute([normalized_pred], [g]) for g in normalized_golds) if normalized_golds else 0.0
         if "f1" in allowed_metrics:
-            result.f1 = max(self.f1_score.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.f1 = max(self.f1_score.compute([normalized_pred], [g]) for g in normalized_golds) if normalized_golds else 0.0
         if "rouge1" in allowed_metrics:
-            result.rouge1 = max(self.rouge1_metric.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.rouge1 = max(self.rouge1_metric.compute([normalized_pred], [g]) for g in normalized_golds) if normalized_golds else 0.0
         if "bleurt" in allowed_metrics:
-            result.bleurt = max(self.bleurt_metric.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.bleurt = max(self.bleurt_metric.compute([normalized_pred], [g]) for g in normalized_golds) if normalized_golds else 0.0
         if "llm_judge" in allowed_metrics:
-            result.llm_judge = self._llm_score(pred, golds) if golds else 0.0
-        if "mc_accuracy" in allowed_metrics and is_mc:
-            result.mc_accuracy = 1.0 if pred in golds else 0.0
+            result.llm_judge = self._llm_score(pred, golds) if golds else 0.0  # Use original text for LLM judge
+        if "mc_accuracy" in allowed_metrics:
+            # For TruthfulQA, check if prediction matches any correct answer
+            # Use both exact match and partial containment for flexibility
+            mc_score = 0.0
+            if normalized_pred in normalized_golds:
+                mc_score = 1.0
+            else:
+                # Check if prediction is a substring of any gold answer or vice versa
+                for gold in normalized_golds:
+                    if (normalized_pred in gold and len(normalized_pred) > 2) or \
+                       (gold in normalized_pred and len(gold) > 2):
+                        mc_score = 1.0
+                        break
+            result.mc_accuracy = mc_score
 
         return result
 

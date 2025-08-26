@@ -22,7 +22,7 @@ class OracleGate:  # offline eval with ground truth
             return False
         return self.norm(candidate_answer) == self.norm(example.y_true)
 
-class JudgeGate:   # online: ask a judge model “is this correct?”
+class JudgeGate:   # online: ask a judge model "is this correct?"
     def __init__(self, judge_prompt_template: str, threshold: float = 0.5):
         self.tpl = judge_prompt_template
         self.threshold = threshold
@@ -39,6 +39,102 @@ class JudgeGate:   # online: ask a judge model “is this correct?”
             except Exception:
                 p = 0.5
         return ("pass" in txt) and (p >= self.threshold)
+
+class MetricGate:  # exit based on evaluation metrics
+    def __init__(self, evaluator, criteria: str, dataset_schema: str = None):
+        """
+        Initialize MetricGate with evaluation criteria
+        
+        Args:
+            evaluator: The evaluator instance to compute metrics
+            criteria: String expression like "mc_accuracy>0.7" or "mc_accuracy>0.6||rouge1>0.5"
+            dataset_schema: Dataset schema to apply dataset-specific thresholds
+        """
+        self.evaluator = evaluator
+        self.criteria = criteria
+        self.dataset_schema = dataset_schema
+        
+        # Parse criteria into evaluable conditions
+        self.parsed_criteria = self._parse_criteria(criteria)
+    
+    def _parse_criteria(self, criteria: str) -> dict:
+        """Parse criteria string into structured conditions"""
+        # Split on || (OR) and && (AND) operators
+        or_groups = criteria.split("||")
+        parsed = {"or_groups": []}
+        
+        for or_group in or_groups:
+            and_conditions = or_group.split("&&")
+            group_conditions = []
+            
+            for condition in and_conditions:
+                condition = condition.strip()
+                # Parse metric>threshold or metric>=threshold
+                if ">=" in condition:
+                    metric, threshold = condition.split(">=")
+                    operator = ">="
+                elif ">" in condition:
+                    metric, threshold = condition.split(">")
+                    operator = ">"
+                else:
+                    raise ValueError(f"Invalid condition format: {condition}")
+                
+                group_conditions.append({
+                    "metric": metric.strip(),
+                    "operator": operator,
+                    "threshold": float(threshold.strip())
+                })
+            
+            parsed["or_groups"].append(group_conditions)
+        
+        return parsed
+    
+    def should_exit(self, example: Example, candidate_answer: str, judge: Optional[Model]) -> bool:
+        """Evaluate if gate should trigger based on metrics"""
+        # Get gold answers for evaluation
+        if hasattr(example, 'correct_answers') and example.correct_answers:
+            golds = example.correct_answers
+        elif example.y_true:
+            golds = [example.y_true]
+        else:
+            return False
+        
+        # Compute metrics
+        try:
+            result = self.evaluator._evaluate_example(
+                pred=candidate_answer,
+                golds=golds
+            )
+        except Exception:
+            return False
+        
+        # Evaluate parsed criteria
+        for or_group in self.parsed_criteria["or_groups"]:
+            # All conditions in an AND group must be true
+            and_result = True
+            for condition in or_group:
+                metric_name = condition["metric"]
+                operator = condition["operator"]
+                threshold = condition["threshold"]
+                
+                # Get metric value
+                metric_value = getattr(result, metric_name, 0.0)
+                
+                # Check condition
+                if operator == ">=":
+                    condition_met = metric_value >= threshold
+                elif operator == ">":
+                    condition_met = metric_value > threshold
+                else:
+                    condition_met = False
+                
+                and_result = and_result and condition_met
+            
+            # If any OR group is satisfied, gate should trigger
+            if and_result:
+                return True
+        
+        return False
 
 # -------------------------
 # Stage protocol + registry
