@@ -20,7 +20,9 @@ class Pipeline:
         judge_for_gate: Optional[Model] = None,
         do_token_diffs: bool = True,
         debug: bool = False,            # <-- new
-        debug_maxlen: int = 220         # <-- new
+        debug_maxlen: int = 220,        # <-- new
+        debug_context: bool = False,    # <-- new: debug all context values
+        keep_context: bool = True       # <-- new: keep context throughout singular question
     ):
         self.stages = stages
         self.gate = gate
@@ -28,6 +30,8 @@ class Pipeline:
         self.do_token_diffs = do_token_diffs
         self.debug = debug
         self.debug_maxlen = debug_maxlen
+        self.debug_context = debug_context
+        self.keep_context = keep_context
 
     def _dbg(self, *parts):
         if self.debug:
@@ -39,15 +43,51 @@ class Pipeline:
         ctx: Dict[str, Any] = {}
         last_answer: Optional[str] = None
 
-        self._dbg(f"\n=== RUN {ex.qid} :: {ex.question!r} ===")
+        self._dbg(f"\n=== Dataset Question {ex.qid} :: {ex.question!r} - \"{ex.y_true or 'No Answer'}\" ===")
 
         for stage in self.stages:
             if last_answer is not None:
                 ctx["last_answer"] = last_answer
 
             self._dbg(f"\n-- Stage {getattr(stage,'id','?')} ({stage.__class__.__name__}) --")
+            
+            # Debug: show context flowing into this stage
+            if self.debug and ctx:
+                self._dbg("Context keys:", list(ctx.keys()))
+                if "last_answer" in ctx:
+                    last_ans_snip = ctx["last_answer"][:self.debug_maxlen] + ("..." if len(ctx["last_answer"]) > self.debug_maxlen else "")
+                    self._dbg("Last answer:", last_ans_snip)
+                # Show other stage contexts if available
+                stage_contexts = [k for k in ctx.keys() if k.startswith("stage_")]
+                if stage_contexts:
+                    self._dbg("Available stage contexts:", stage_contexts)
+            
+            # Debug: show full context values if debug_context is enabled
+            if self.debug_context and ctx:
+                self._dbg("\n--- FULL CONTEXT DEBUG ---")
+                for key, value in ctx.items():
+                    if isinstance(value, dict):
+                        self._dbg(f"{key}: {dict}")
+                        for subkey, subvalue in value.items():
+                            subvalue_str = str(subvalue)
+                            if len(subvalue_str) > self.debug_maxlen:
+                                subvalue_str = subvalue_str[:self.debug_maxlen] + "..."
+                            self._dbg(f"  {subkey}: {subvalue_str}")
+                    else:
+                        value_str = str(value)
+                        if len(value_str) > self.debug_maxlen:
+                            value_str = value_str[:self.debug_maxlen] + "..."
+                        self._dbg(f"{key}: {value_str}")
+                self._dbg("--- END CONTEXT DEBUG ---\n")
 
             res = stage.run(ex, ctx)
+            
+            # Persist stage context if keep_context is enabled
+            if self.keep_context and res.evidence:
+                stage_ctx_key = f"stage_{getattr(stage,'id','?')}"
+                ctx[stage_ctx_key] = res.evidence
+                if self.debug:
+                    self._dbg(f"Stored context key: {stage_ctx_key} (evidence keys: {list(res.evidence.keys())})")
             trace.stage_results.append(res)
 
             # Debug: show prompt/evidence/errors
@@ -184,6 +224,12 @@ def build_pipeline(
                 exit_on_pass=bool(s.get("exit_on_pass", True)),
                 threshold=float(s.get("threshold", 0.5))
             ))
+        elif t == "confidence_check":
+            stages.append(make_stage("confidence_check",
+                id=sid,
+                model=models[s["model"]],
+                template=s.get("template", DEFAULT_TEMPLATES["confidence_check"])
+            ))
         else:
             kw = {k:v for k,v in s.items() if k not in {"type"}}
             stages.append(make_stage(t, **kw))
@@ -192,27 +238,29 @@ def build_pipeline(
         stages=stages,
         gate=gate,
         judge_for_gate=gate_judge,
-        do_token_diffs=bool(config.get("token_diffs", True))
+        do_token_diffs=bool(config.get("token_diffs", True)),
+        debug_context=bool(config.get("debug_context", False)),
+        keep_context=bool(config.get("keep_context", True))  # Default to True
     )
 
 DEFAULT_TEMPLATES = {
-    "baseline": "Q: {question}\nA:",
+    "baseline": "Answer in one word or phrase only.\n\nQ: {question}\nA:",
     "apo_rewrite": (
         "Rewrite the user question into a concise, specific prompt that reduces ambiguity "
         "and includes constraints to avoid hallucinations. Output only the rewritten prompt.\n\nQ: {question}"
     ),
-    "apo_target": "Use this optimized prompt:\n\n{optimized_prompt}\n\nAnswer succinctly and cite key facts.",
+    "apo_target": "Answer in one word or phrase only.\n\n{optimized_prompt}",
     "cove": (
-        "You are verifying an answer’s factuality via Chain-of-Verification.\n"
+        "Answer in one word or phrase only. Verify the answer's factuality first.\n"
         "Question: {question}\n"
         "Prior answer: {prior_answer}\n"
-        "1) List claims.\n2) Verify each claim with independent checks.\n3) Give a corrected final answer only."
+        "Give only the corrected final answer."
     ),
     "self_correct": (
-        "Revise only factual errors at temperature 0.\n"
+        "Answer in one word or phrase only. Fix any factual errors.\n"
         "Question: {question}\n"
         "Current answer: {prior_answer}\n"
-        "Return a corrected final answer only."
+        "Return only the corrected answer."
     ),
     "judge": (
         "You are a strict fact-checking judge.\n"
@@ -225,5 +273,14 @@ DEFAULT_TEMPLATES = {
         "Question: {question}\n"
         "Answer: {answer}\n"
         "Return PASS <p=...> or FAIL <p=...>."
+    ),
+    "confidence_check": (
+        "You have passed through all stages of prompt optimization for this question. "
+        "Your previous answer may or may not be correct.\n\n"
+        "Question: {question}\n"
+        "Your previous answer: {previous_answer}\n\n"
+        "Please respond with exactly one of these two options:\n"
+        "1. 'My last answer was correct, I am confident in it.'\n"
+        "2. 'I was wrong and do not know the answer.'"
     )
 }

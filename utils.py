@@ -1,12 +1,21 @@
+from __future__ import annotations
+
 import json
 import re
-from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
-from dataset import QAResponse
- # Assuming dataset.py is in the same directory
+if TYPE_CHECKING:
+    from dataset import QAResponse
+@dataclass
+class Example:
+    """Use y_true only in offline eval. In production, omit it."""
+    qid: str
+    question: str
+    y_true: Optional[str] = None
+
+# Assuming dataset.py is in the same directory
 # -------------------------
 # Core data structures
 # -------------------------
@@ -18,13 +27,6 @@ class ModelResponse:
     completion_tokens: int = 0
     cost: float = 0.0
     meta: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class Example:
-    """Use y_true only in offline eval. In production, omit it."""
-    qid: str
-    question: str
-    y_true: Optional[str] = None
 
 @dataclass
 class StageResult:
@@ -77,6 +79,7 @@ def f1_score(pred: str, truth: str) -> float:
 
 def parse_llm_response(llm_output: str) -> Optional[QAResponse]:
     try:
+        from dataset import QAResponse  # Import here to avoid circular import
         data = json.loads(llm_output)
         return QAResponse(**data)
     except Exception as e:

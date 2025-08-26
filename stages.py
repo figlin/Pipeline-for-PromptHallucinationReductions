@@ -2,9 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Protocol, Callable
 
-from utils import StageResult
+from utils import StageResult, Example
 
-from dataset import Example  # Assuming dataset.py is in the same directory
 from models import Model
 # from pipeline import pipeline
 
@@ -199,3 +198,42 @@ class ExternalJudgeStage:
                 evidence=evidence,
                 model_usage={"model": getattr(self.judge, "name", "unknown")}
             )
+
+@register_stage("confidence_check")
+class ConfidenceCheckStage:
+    """Asks the model to evaluate its confidence in its previous answer."""
+    def __init__(self, id: str, model: Model, template: str):
+        self.id, self.model, self.tpl = id, model, template
+    def run(self, ex: Example, ctx: Dict[str, Any]) -> StageResult:
+        prev_ans = ctx.get("last_answer", "")
+        prompt = self.tpl.format(question=ex.question, previous_answer=prev_ans, correct_answer=ex.y_true or "unknown")
+        try:
+            r = self.model.generate(prompt, temperature=0.0)
+            response = (r.text or "").strip()
+            evidence = {"prompt": prompt, "confidence_response": response}
+            
+            # Check if the model is confident or admits uncertainty
+            response_lower = response.lower()
+            is_confident = "my last answer was correct" in response_lower and "confident" in response_lower
+            admits_wrong = "i was wrong" in response_lower and "do not know" in response_lower
+            
+            evidence["is_confident"] = is_confident
+            evidence["admits_wrong"] = admits_wrong
+            
+            # Return the model's confidence response, not the previous answer
+            return StageResult(
+                stage_id=self.id, 
+                answer=response, 
+                should_exit=False,
+                evidence=evidence,
+                model_usage={"model": getattr(self.model, "name", "unknown"), **r.__dict__}
+            )
+        except Exception as e:
+            return StageResult(
+                stage_id=self.id, 
+                answer=prev_ans,  # Keep previous answer on error
+                should_exit=False,
+                evidence={"prompt": prompt, "error": str(e)},
+                model_usage={"model": getattr(self.model, "name", "unknown")}
+            )
+            
