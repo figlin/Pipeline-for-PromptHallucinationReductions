@@ -77,8 +77,9 @@ class Pipeline:
                     pred=res.answer,
                     golds=[ex.y_true] if self.evaluator.dataset.schema == 'simpleqa' else ex.correct_answers, 
                 )
-            self.aggregated_metrics.add_stage_result(stage.__class__.__name__, metrics_)
-            self._dbg(f" {stage.__class__.__name__} Result : {metrics_.model_dump()}")
+            if stage.__class__.__name__ != "ConfidenceCheckStage": # skipped the ConfidenceCheckStage as metrics not applicable
+                self.aggregated_metrics.add_stage_result(stage.__class__.__name__, metrics_)
+                self._dbg(f" {stage.__class__.__name__} Result : {metrics_.model_dump()}")
 
             # Debug: show prompt/evidence/errors
             ev = res.evidence or {}
