@@ -148,7 +148,7 @@ class ScaleDownLLMWrapper:
         api_key: str,
         model: str = "gpt-4o",
         rate: float = 0.7,
-        endpoint: str = "https://api.scaledown.xyz/compress",
+        endpoint: str = "https://api.scaledown.xyz/compress/raw",
         timeout: float = 30.0,
         default_params: Optional[Dict[str, Any]] = None,
     ):
@@ -180,8 +180,10 @@ class ScaleDownLLMWrapper:
         payload = {
             "prompt": prompt,
             "model": self.model,
-            "rate": rate_value,
-            "context": context  # Always include context, even if empty
+            "context": context,  # Always include context, even if empty
+            "scaedown": {
+                "rate": rate_value,
+            }
         }
         
         try:
@@ -191,10 +193,10 @@ class ScaleDownLLMWrapper:
             print(f"  Payload: {json.dumps(payload, indent=2)}")
             
             response = requests.post(
-                self.endpoint, 
+                url=self.endpoint, 
                 headers=headers, 
                 data=json.dumps(payload),
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             
             print(f"[DEBUG] ScaleDown Response Status: {response.status_code}")

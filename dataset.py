@@ -30,6 +30,51 @@ class EvalResult (BaseModel):
     llm_judge: float = 0.0
     mc_accuracy: float = 0.0
 
+class StageAverages(BaseModel):
+    average_results: Dict[str, EvalResult]
+
+    def __str__(self):
+        return self.model_dump_json(indent=2)
+
+class AggregatedMetrics(EvalResult):
+    def __init__(self):
+        super().__init__()
+        self._results = {}
+
+    def add_stage_result(self, stage_name, result: EvalResult):
+        if stage_name not in self._results:
+            self._results[stage_name] = EvalResult()
+        current = self._results[stage_name]
+        for field in result.model_fields:
+            setattr(current, field, getattr(current, field) + getattr(result, field))
+
+    def get_stage_average(self, stage) -> EvalResult:
+        attr_name = f"{stage.__class__.__name__}_result"
+        values = self._results.get(attr_name, [])
+        return self._compute_average(values)
+
+    def all_stage_averages(self):
+        return StageAverages(
+            average_results = {
+                stage_name: self._compute_average(vals)
+                for stage_name, vals in self._results.items() if vals
+                }
+        )
+
+    def _compute_average(self, values) -> EvalResult | None:
+        if values.n == 0:
+            return None
+        return EvalResult(
+                n=values.n,
+                em=values.em / values.n,
+                f1=values.f1 / values.n,
+                rouge1=values.rouge1 / values.n,
+                bleurt=values.bleurt / values.n,
+                llm_judge=values.llm_judge / values.n,
+                mc_accuracy=values.mc_accuracy / values.n,
+            )
+
+
 class Dataset:
     def __init__(self, source: Union[str, List[Dict[str, Any]]], range_filter: Optional[str] = None):
         self.examples: List[Example] = []
