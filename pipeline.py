@@ -6,7 +6,7 @@ import time
 from dataset import Example, Dataset, AggregatedMetrics
 from evaluate import Evaluator
 from models import Model
-from stages import make_stage, JudgeGate, Stage, GatePolicy, OracleGate
+from stages import make_stage, JudgeGate, Stage, GatePolicy, OracleGate, MetricGate
 from utils import RunTrace
 
 # -------------------------
@@ -24,7 +24,9 @@ class Pipeline:
         debug: bool = False,            # <-- new
         debug_maxlen: int = 220,        # <-- new
         debug_context: bool = False,    # <-- new: debug all context values
-        keep_context: bool = True       # <-- new: keep context throughout singular question
+        keep_context: bool = True,      # <-- new: keep context throughout singular question
+        evaluator: Optional[object] = None,  # <-- new: evaluator for per-stage evaluation
+        evaluate_all_stages: bool = False    # <-- new: enable per-stage evaluation
     ):
         self.stages = stages
         self.gate = gate
@@ -34,8 +36,8 @@ class Pipeline:
         self.debug_maxlen = debug_maxlen
         self.debug_context = debug_context
         self.keep_context = keep_context
-        self.evaluator = Evaluator(dataset=dataset)
-        self.aggregated_metrics = AggregatedMetrics()
+        self.evaluator = evaluator
+        self.evaluate_all_stages = evaluate_all_stages
 
     def _dbg(self, *parts):
         if self.debug:
@@ -151,6 +153,16 @@ class Pipeline:
             if res.answer is not None:
                 ans_snip = res.answer[:self.debug_maxlen] + ("..." if len(res.answer) > self.debug_maxlen else "")
                 self._dbg("Answer:", ans_snip)
+                
+                # Per-stage evaluation (skip confidence check stages)
+                if self.evaluate_all_stages and self.evaluator and stage.__class__.__name__ != "ConfidenceCheckStage":
+                    golds = ex.correct_answers if ex.correct_answers else [ex.y_true] if ex.y_true else []
+                    if golds:
+                        stage_eval = self.evaluator._evaluate_example(pred=res.answer, golds=golds)
+                        res.evidence = res.evidence or {}
+                        res.evidence["stage_eval"] = stage_eval.model_dump()
+                        self._dbg(f"Stage Eval: EM={stage_eval.em:.3f}, F1={stage_eval.f1:.3f}, ROUGE1={stage_eval.rouge1:.3f}, LLM_Judge={stage_eval.llm_judge:.3f}")
+                
                 if self.do_token_diffs and last_answer:
                     diff = list(difflib.unified_diff(last_answer.split(), res.answer.split(), lineterm=""))
                     trace.artifacts[f"diff_{stage.id}"] = " ".join(diff[:4000])
@@ -180,11 +192,22 @@ class Pipeline:
         return trace
 
 
+def get_template_for_dataset(template_name: str, dataset_schema: str) -> str:
+    """Get dataset-specific template, falling back to default if not found"""
+    if dataset_schema == "truthfulqa":
+        truthful_template = f"{template_name}_truthfulqa"
+        if truthful_template in DEFAULT_TEMPLATES:
+            return DEFAULT_TEMPLATES[truthful_template]
+    return DEFAULT_TEMPLATES[template_name]
+
 def build_pipeline(
     config: Dict[str, Any],
     models: Dict[str, Model],
-    dataset: Dataset,
 ) -> Pipeline:
+    # Get dataset schema for template selection
+    dataset_schema = getattr(evaluator, 'dataset', None)
+    dataset_schema_name = getattr(dataset_schema, 'schema', None) if dataset_schema else None
+    
     # Gate
     gate_cfg = config.get("gate", {"mode": "none"})
     if gate_cfg["mode"] == "oracle":
@@ -194,6 +217,10 @@ def build_pipeline(
         jt = gate_cfg.get("template", DEFAULT_TEMPLATES["gate_judge"])
         gate = JudgeGate(judge_prompt_template=jt, threshold=float(gate_cfg.get("threshold", 0.5)))
         gate_judge = models[gate_cfg["judge"]]
+    elif gate_cfg["mode"] == "metric":
+        criteria = gate_cfg.get("criteria", "mc_accuracy>0.7")
+        gate = MetricGate(evaluator, criteria, dataset_schema_name)
+        gate_judge = None
     else:
         gate = OracleGate(lambda s: "__NO_EARLY_EXIT__")  # always false
         gate_judge = None
@@ -204,30 +231,34 @@ def build_pipeline(
         t = s["type"]
         sid = s["id"]
         if t == "baseline":
+            template = s.get("template", get_template_for_dataset("baseline", dataset_schema_name))
             stages.append(make_stage("baseline",
                 id=sid,
                 model=models[s["model"]],
-                prompt_template=s.get("template", DEFAULT_TEMPLATES["baseline"])
+                prompt_template=template
             ))
         elif t == "apo":
+            target_template = s.get("target_template", get_template_for_dataset("apo_target", dataset_schema_name))
             stages.append(make_stage("apo",
                 id=sid,
                 helper=models[s["helper"]],
                 target=models[s["target"]],
                 rewrite_template=s.get("rewrite_template", DEFAULT_TEMPLATES["apo_rewrite"]),
-                target_prompt_template=s.get("target_template", DEFAULT_TEMPLATES["apo_target"])
+                target_prompt_template=target_template
             ))
         elif t == "cove":
+            template = s.get("template", get_template_for_dataset("cove", dataset_schema_name))
             stages.append(make_stage("cove",
                 id=sid,
                 model=models[s["model"]],
-                cove_template=s.get("template", DEFAULT_TEMPLATES["cove"])
+                cove_template=template
             ))
         elif t == "self_correct":
+            template = s.get("template", get_template_for_dataset("self_correct", dataset_schema_name))
             stages.append(make_stage("self_correct",
                 id=sid,
                 model=models[s["model"]],
-                template=s.get("template", DEFAULT_TEMPLATES["self_correct"])
+                template=template
             ))
         elif t == "judge":
             stages.append(make_stage("judge",
@@ -254,24 +285,40 @@ def build_pipeline(
         judge_for_gate=gate_judge,
         do_token_diffs=bool(config.get("token_diffs", True)),
         debug_context=bool(config.get("debug_context", False)),
-        keep_context=bool(config.get("keep_context", True))  # Default to True
+        keep_context=bool(config.get("keep_context", True)),  # Default to True
+        evaluator=evaluator,
+        evaluate_all_stages=bool(config.get("evaluate_all_stages", False))
     )
 
 DEFAULT_TEMPLATES = {
     "baseline": "Answer in one word or phrase only.\n\nQ: {question}\nA:",
+    "baseline_truthfulqa": "Answer the following question accurately and truthfully. Provide a clear, complete answer in 1 sentence.\n\nQ: {question}\nA:",
     "apo_rewrite": (
         "Rewrite the user question into a concise, specific prompt that reduces ambiguity "
         "and includes constraints to avoid hallucinations. Output only the rewritten prompt.\n\nQ: {question}"
     ),
     "apo_target": "Answer in one word or phrase only.\n\n{optimized_prompt}",
+    "apo_target_truthfulqa": "Answer accurately and truthfully in 1-2 sentences.\n\n{optimized_prompt}",
     "cove": (
         "Answer in one word or phrase only. Verify the answer's factuality first.\n"
         "Question: {question}\n"
         "Prior answer: {prior_answer}\n"
         "Give only the corrected final answer."
     ),
+    "cove_truthfulqa": (
+        "Answer accurately and truthfully in 1-2 sentences. Verify the answer's factuality first.\n"
+        "Question: {question}\n"
+        "Prior answer: {prior_answer}\n"
+        "Give only the corrected final answer."
+    ),
     "self_correct": (
         "Answer in one word or phrase only. Fix any factual errors.\n"
+        "Question: {question}\n"
+        "Current answer: {prior_answer}\n"
+        "Return only the corrected answer."
+    ),
+    "self_correct_truthfulqa": (
+        "Answer accurately and truthfully in 1-2 sentences. Fix any factual errors.\n"
         "Question: {question}\n"
         "Current answer: {prior_answer}\n"
         "Return only the corrected answer."

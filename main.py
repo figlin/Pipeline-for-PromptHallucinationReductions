@@ -9,6 +9,8 @@ from dataset import AggregatedMetrics, dataset, load_from_csv
 from evaluate import Evaluator
 from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
+from pipeline_config import get_config, list_configs
+from utils import normalize_text
 
 load_dotenv()
 
@@ -113,19 +115,13 @@ if __name__ == "__main__":
 
     DEBUG_CONTEXT = os.getenv("PIPE_DEBUG_CONTEXT", "0") not in ("0", "", "false", "False", "FALSE")
     
-    config = {
-        "stages": [
-            {"type":"baseline","id":"s0","model":"target"}, # Target model baseline
-            {"type":"apo","id":"s1","helper":"helper","target":"target"}, # Helper rewrites, target answers
-            {"type":"cove","id":"s2","model":"target"}, # Target model verification
-            {"type":"self_correct","id":"s3","model":"target"}, # Target model self-correction
-            {"type":"confidence_check","id":"s4","model":"target"}, # Target model confidence check
-            # {"type":"judge","id":"s5","judge":"judge","exit_on_pass": True, "threshold": 0.8}
-        ],
-        "gate": {"mode": "oracle"},
-        "token_diffs": True,
-        "debug_context": DEBUG_CONTEXT
-    }
+    # Load pipeline configuration
+    config_name = os.getenv("PIPELINE_CONFIG", "default")
+    
+    # Special handling for listing configs
+    if config_name == "list":
+        list_configs()
+        sys.exit(0)
 
     DEBUG = os.getenv("PIPE_DEBUG", "0") not in ("0", "", "false", "False", "FALSE")
     # Print model configuration
@@ -134,6 +130,7 @@ if __name__ == "__main__":
     print(f"Helper: {models['helper'].name}")
     print(f"Judge: {models['judge'].name}")
     print()
+
     
     # Load dataset based on environment variable
     dataset_path = os.getenv("DATASET_PATH", "internal")
@@ -157,11 +154,46 @@ if __name__ == "__main__":
     pipe.debug = DEBUG
     pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN") or "220")
 
-    evaluator = Evaluator(dataset=dataset_to_run)
-    metrics_handler = AggregatedMetrics()
+    evaluator = Evaluator(dataset=dataset_to_run, llm_judge_model=models.get("judge"))
+    
+    # Load pipeline configuration based on dataset or environment setting
+    dataset_schema = getattr(dataset_to_run, 'schema', None) if dataset_to_run else None
+    config = get_config(config_name, dataset_schema)
+    
+    # Override debug setting from environment
+    config["debug_context"] = DEBUG_CONTEXT
+    
+    print(f"Using pipeline configuration: '{config_name}' for dataset: {dataset_schema}")
+    if config.get("gate", {}).get("mode") == "metric":
+        print(f"Gate criteria: {config['gate']['criteria']}")
+    print()
+    
+    pipe = build_pipeline(config, models, evaluator)
+    # re-wrap with debug (or pass debug into a factory if you prefer)
+    pipe.debug = DEBUG
+    pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN") or "220")
+    
+    total = EvalResult()
+    gate_exit_counts = {}  # Track where each prompt exited
+    
     for ex in dataset_to_run:
         trace = pipe.run_one(ex)
+        # Use correct_answers for all datasets - SimpleQA populates this correctly
+        golds = ex.correct_answers if ex.correct_answers else [ex.y_true]
+        
+        # Debug output
+        if DEBUG:
+            print(f"[DEBUG] Evaluating: pred='{trace.final_answer}' vs golds={golds}")
+            print(f"[DEBUG] Schema: {evaluator.dataset.schema}, ex.y_true='{ex.y_true}', ex.correct_answers={ex.correct_answers}")
+            print(f"[DEBUG] Normalized pred: '{normalize_text(trace.final_answer)}' vs normalized golds: {[normalize_text(g) for g in golds]}")
+        
+        result=evaluator._evaluate_example(
+            pred=trace.final_answer,
+            golds=golds,
+        )
+        expected = ex.y_true or (ex.correct_answers[0] if ex.correct_answers else "N/A")
         print(f"[{ex.qid}] Q: {ex.question}")
+        print(f"  Expected: {expected}")
         print("  Final:", trace.final_answer)
         
         exit_technique = "Completed All Stages"
@@ -171,16 +203,63 @@ if __name__ == "__main__":
                 exit_technique = f"Gate Exit after {get_stage_technique(stage_id, config['stages'])}"
             else:
                 exit_technique = f"Stage Exit at {get_stage_technique(trace.early_exit_at, config['stages'])}"
+        
+        # Track gate exit counts
+        gate_exit_counts[exit_technique] = gate_exit_counts.get(exit_technique, 0) + 1
+        
         print("  Exit at:", exit_technique)
         print("  Tokens:", trace.total_tokens)
-        
+        print()  # Add blank line for spacing
         # if ex.y_true:
         #     is_correct = trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower()
         #     print("  Correct:", is_correct)
-    average_performance = pipe.aggregated_metrics.all_stage_averages()
-    print(" Aggregated Results: \n")
-    print(average_performance)
+
+    total.em /= total.n
+    total.f1 /= total.n
+    total.rouge1 /= total.n
+    total.bleurt /= total.n
+    total.llm_judge /= total.n
+    total.mc_accuracy /= total.n
+    print("Final Report: ", total.model_dump())
     print("-" * 50)
     
-    if 'trace' in locals() and trace:
-        print("Final:", trace.final_answer, "Exit at:", trace.early_exit_at, "Tokens:", trace.total_tokens)
+    # Print gate exit summary table
+    print("\n=== Gate Exit Summary ===")
+    if gate_exit_counts:
+        # Calculate percentages and format table
+        total_questions = sum(gate_exit_counts.values())
+        
+        # Sort by count (descending) for better readability
+        sorted_exits = sorted(gate_exit_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        print(f"{'Exit Point':<35} {'Count':<8} {'Percentage':<10}")
+        print("-" * 55)
+        
+        for exit_point, count in sorted_exits:
+            percentage = (count / total_questions) * 100
+            print(f"{exit_point:<35} {count:<8} {percentage:>6.1f}%")
+        
+        print("-" * 55)
+        print(f"{'Total Questions':<35} {total_questions:<8} {'100.0%':<10}")
+        
+        # Additional insights
+        early_exits = total_questions - gate_exit_counts.get("Completed All Stages", 0)
+        if early_exits > 0:
+            early_exit_rate = (early_exits / total_questions) * 100
+            print(f"\nEarly Exit Rate: {early_exit_rate:.1f}% ({early_exits}/{total_questions} questions)")
+            
+            # Calculate token savings (rough estimate)
+            avg_tokens_early = sum(trace.total_tokens for trace in locals().get('traces', []) if trace.early_exit_at) / max(early_exits, 1) if early_exits > 0 else 0
+            if 'trace' in locals() and trace:
+                # Use the last trace as an estimate for full pipeline tokens
+                estimated_full_tokens = trace.total_tokens if not trace.early_exit_at else trace.total_tokens * 1.5
+                if avg_tokens_early > 0:
+                    estimated_savings = (estimated_full_tokens - avg_tokens_early) / estimated_full_tokens * 100
+                    print(f"Estimated Token Savings: ~{estimated_savings:.1f}% per early exit")
+        else:
+            print(f"\nEarly Exit Rate: 0.0% (No early exits - all questions completed all stages)")
+    else:
+        print("No gate exit data collected.")
+    
+    print()
+    

@@ -187,10 +187,12 @@ class ScaleDownLLMWrapper:
         }
         
         try:
-            # Debug logging
-            print(f"[DEBUG] ScaleDown LLM Request:")
-            print(f"  Endpoint: {self.endpoint}")
-            print(f"  Payload: {json.dumps(payload, indent=2)}")
+            # Debug logging (controlled by PIPE_DEBUG_HTTP environment variable)
+            debug_http = os.getenv("PIPE_DEBUG_HTTP", "0") != "0"
+            if debug_http:
+                print(f"[DEBUG] ScaleDown LLM Request:")
+                print(f"  Endpoint: {self.endpoint}")
+                print(f"  Payload: {json.dumps(payload, indent=2)}")
             
             response = requests.post(
                 url=self.endpoint, 
@@ -199,8 +201,9 @@ class ScaleDownLLMWrapper:
                 timeout=self.timeout,
             )
             
-            print(f"[DEBUG] ScaleDown Response Status: {response.status_code}")
-            print(f"[DEBUG] ScaleDown Response: {response.text[:500]}...")
+            if debug_http:
+                print(f"[DEBUG] ScaleDown Response Status: {response.status_code}")
+                print(f"[DEBUG] ScaleDown Response: {response.text[:500]}...")
             
             if response.status_code != 200:
                 raise RuntimeError(f"ScaleDown LLM HTTP {response.status_code}: {response.text}")
