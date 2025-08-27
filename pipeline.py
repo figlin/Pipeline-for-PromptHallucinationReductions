@@ -95,7 +95,8 @@ class Pipeline:
             trace.stage_results.append(res)
             metrics_=self.evaluator._evaluate_example(
                     pred=res.answer,
-                    golds=[ex.y_true] if self.evaluator.dataset.schema == 'simpleqa' else ex.correct_answers, 
+                    bads=ex.incorrect_answers,
+                    golds=[ex.y_true] if self.evaluator.dataset.schema == 'simpleqa' else ex.correct_answers,
                 )
             if stage.__class__.__name__ != "ConfidenceCheckStage": # skipped the ConfidenceCheckStage as metrics not applicable
                 self.aggregated_metrics.add_stage_result(stage.__class__.__name__, metrics_)
