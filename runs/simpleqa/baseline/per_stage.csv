@@ -1,0 +1,6 @@
+qid,stage_id,stage_type,sub,model,should_exit,verdict,p,answer_snip,prompt_tokens,completion_tokens,cost,sd_full_tokens,sd_full_cost,sd_compressed_tokens,sd_compressed_cost,sd_savings_tokens,sd_savings_cost
+1,s0,BaselineAsk,,echo,False,,,A:,23,1,2.4e-05,,,,,,
+2,s0,BaselineAsk,,echo,False,,,A:,26,1,2.7e-05,,,,,,
+3,s0,BaselineAsk,,echo,False,,,A:,30,1,3.1e-05,,,,,,
+4,s0,BaselineAsk,,echo,False,,,A:,24,1,2.4999999999999998e-05,,,,,,
+5,s0,BaselineAsk,,echo,False,,,A:,46,1,4.7e-05,,,,,,

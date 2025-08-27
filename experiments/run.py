@@ -2,11 +2,11 @@ import os, argparse, time
 from typing import Dict, List
 
 from data.loaders import load_simpleqa, load_truthfulqa
-from experiments.logging import CsvLogger, write_summary
+from experiments.logging import CsvLogger, write_summary, CsvStageLogger
 from experiments.metrics import compute_binary_accuracy, summarize_budget, early_exit_hist, naive_binaryizer
 from pipeline import build_pipeline
 
-# Try ScaleDown model; fall back to a local echo so you can test without keys.
+# Try ScaleDown direct model; fall back to echo so it runs without keys.
 try:
     from models import ScaledownDirectModel
 except Exception:
@@ -78,19 +78,25 @@ def main():
     models = build_models()
     pipe = build_pipeline(get_config(args.config), models)
 
+    # enable console debug from env
+    pipe.debug = os.getenv("PIPE_DEBUG", "0").lower() not in ("0", "false", "")
+    pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN", "220"))
+
     traces = []
     t0 = time.time()
     for ex in data:
         tr = pipe.run_one(ex)
-        # keep gold for naive metrics
         tr.y_true = ex.y_true
         traces.append(tr)
 
     out_dir = f"{args.out}/{args.dataset}/{args.config}"
-    logger = CsvLogger(out_dir)
+    sample_logger = CsvLogger(out_dir)
+    stage_logger = CsvStageLogger(out_dir)
     for tr in traces:
-        logger.log_trace(tr)
-    logger.flush()
+        sample_logger.log_trace(tr)
+        stage_logger.log_trace(tr)
+    sample_logger.flush()
+    stage_logger.flush()
 
     acc = compute_binary_accuracy(traces, naive_binaryizer)
     bud = summarize_budget(traces)
