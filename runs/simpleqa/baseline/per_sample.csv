@@ -1,6 +1,0 @@
-qid,question,final_answer,early_exit_at,total_tokens,total_cost,timing_sec
-1,Who received the IEEE Frank Rosenblatt Award in 2010?,A:,,15,0.000015,0.000
-2,Who was awarded the Oceanography Society's Jerlov Award in 2018?,A:,,18,0.000018,0.000
-3,"What's the name of the women's liberal arts college in Cambridge, Massachusetts?",A:,,22,0.000022,0.000
-4,In whose honor was the Leipzig 1877 tournament organized?,A:,,16,0.000016,0.000
-5,"According to Karl Küchler, what did Empress Elizabeth of Austria's favorite sculpture depict, which was made for her villa Achilleion at Corfu?",A:,,38,0.000038,0.000

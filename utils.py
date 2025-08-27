@@ -1,11 +1,22 @@
 from __future__ import annotations
+
+import json
+import re
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
-# -------------------------
-# Core data structures
-# -------------------------
+if TYPE_CHECKING:
+    from dataset import QAResponse
 
+@dataclass
+class Example:
+    # using y_true only in offline eval
+    qid: str
+    question: str
+    y_true: Optional[str] = None
+
+# core data structures flowing through the pipeline
 @dataclass
 class ModelResponse:
     text: str
@@ -13,14 +24,6 @@ class ModelResponse:
     completion_tokens: int = 0
     cost: float = 0.0
     meta: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class Example:
-    """Use y_true only in offline eval. In production, omit it."""
-    qid: str
-    question: str
-    y_true: Optional[str] = None
-    meta: Dict[str, Any] = field(default_factory=dict)  # <-- keep this for loaders
 
 @dataclass
 class StageResult:
@@ -40,4 +43,54 @@ class RunTrace:
     total_tokens: int = 0
     total_cost: float = 0.0
     timing_sec: float = 0.0
-    artifacts: Dict[str, Any] = field(default_factory=dict)  # e.g., diffs, prompts, raw json
+    artifacts: Dict[str, Any] = field(default_factory=dict)  # diffs, prompts, raw json
+
+def normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+def safe_list(val: Union[str, List[str]]) -> List[str]:
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        # handling semicolon separated fields
+        parts = [v.strip() for v in val.split(";") if v.strip()]
+        return parts
+    return []
+
+# simple token overlap f1 for SimpleQA
+def f1_score(pred: str, truth: str) -> float:
+    pred_tokens = pred.split()
+    truth_tokens = truth.split()
+    common = Counter(pred_tokens) & Counter(truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0.0
+    precision = num_same / len(pred_tokens)
+    recall = num_same / len(truth_tokens)
+    return (2 * precision * recall) / (precision + recall)
+
+def parse_llm_response(llm_output: str) -> Optional[QAResponse]:
+    try:
+        from dataset import QAResponse  # importing here to avoid circular import
+        data = json.loads(llm_output)
+        return QAResponse(**data)
+    except Exception as e:
+        print("Parsing failed:", e)
+        return None
+
+SCHEMA_REGISTRY = {
+    "simpleqa": {
+        "keys": {"answer", "problem"},
+        "parser": "_parse_simpleqa",
+        "id_keys": ["problem", "metadata"],
+    },
+    "truthfulqa": {
+        "keys": {"Best Answer", "Question"},
+        "parser": "_parse_truthfulqa",
+        "id_keys": ["Question", "Category"],
+    },
+}
