@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from dataset import EvalResult, dataset, load_from_csv
+from dataset import AggregatedMetrics, dataset, load_from_csv
 from evaluate import Evaluator
 from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
@@ -148,6 +148,11 @@ if __name__ == "__main__":
     if not dataset_to_run:
         print(f"Error: No data loaded from '{dataset_path}'. Exiting.", file=sys.stderr)
         sys.exit(1)
+    
+    pipe = build_pipeline(config, models, dataset_to_run)
+    # re-wrap with debug (or pass debug into a factory if you prefer)
+    pipe.debug = DEBUG
+    pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN") or "220")
 
     evaluator = Evaluator(dataset=dataset_to_run, llm_judge_model=models.get("judge"))
     
@@ -190,14 +195,7 @@ if __name__ == "__main__":
         print(f"[{ex.qid}] Q: {ex.question}")
         print(f"  Expected: {expected}")
         print("  Final:", trace.final_answer)
-        print(" Result", result.model_dump())
-        total.n += result.n
-        total.em += result.em
-        total.f1 += result.f1
-        total.rouge1 += result.rouge1
-        total.bleurt += result.bleurt
-        total.llm_judge += result.llm_judge
-
+        
         exit_technique = "Completed All Stages"
         if trace.early_exit_at:
             if trace.early_exit_at.startswith("gate_after:"):

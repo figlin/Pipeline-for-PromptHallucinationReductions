@@ -3,7 +3,8 @@ from typing import Any, Dict, List, Optional
 import difflib
 import time
 
-from dataset import Example
+from dataset import Example, Dataset, AggregatedMetrics
+from evaluate import Evaluator
 from models import Model
 from stages import make_stage, JudgeGate, Stage, GatePolicy, OracleGate, MetricGate
 from utils import RunTrace
@@ -17,6 +18,7 @@ class Pipeline:
         self,
         stages: List[Stage],
         gate: GatePolicy,
+        dataset: Dataset,
         judge_for_gate: Optional[Model] = None,
         do_token_diffs: bool = True,
         debug: bool = False,            # <-- new
@@ -93,6 +95,13 @@ class Pipeline:
                 if self.debug:
                     self._dbg(f"Stored context key: {stage_ctx_key} (evidence keys: {list(res.evidence.keys())})")
             trace.stage_results.append(res)
+            metrics_=self.evaluator._evaluate_example(
+                    pred=res.answer,
+                    golds=[ex.y_true] if self.evaluator.dataset.schema == 'simpleqa' else ex.correct_answers, 
+                )
+            if stage.__class__.__name__ != "ConfidenceCheckStage": # skipped the ConfidenceCheckStage as metrics not applicable
+                self.aggregated_metrics.add_stage_result(stage.__class__.__name__, metrics_)
+                self._dbg(f" {stage.__class__.__name__} Result : {metrics_.model_dump()}")
 
             # Debug: show prompt/evidence/errors
             ev = res.evidence or {}
@@ -193,7 +202,6 @@ def get_template_for_dataset(template_name: str, dataset_schema: str) -> str:
 def build_pipeline(
     config: Dict[str, Any],
     models: Dict[str, Model],
-    evaluator: Optional[object] = None,
 ) -> Pipeline:
     # Get dataset schema for template selection
     dataset_schema = getattr(evaluator, 'dataset', None)
@@ -272,6 +280,7 @@ def build_pipeline(
     return Pipeline(
         stages=stages,
         gate=gate,
+        dataset=dataset,
         judge_for_gate=gate_judge,
         do_token_diffs=bool(config.get("token_diffs", True)),
         debug_context=bool(config.get("debug_context", False)),
