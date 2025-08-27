@@ -148,7 +148,7 @@ class ScaleDownLLMWrapper:
         api_key: str,
         model: str = "gpt-4o",
         rate: float = 0.7,
-        endpoint: str = "https://api.scaledown.xyz/compress/raw",
+        endpoint: str = "https://api.scaledown.xyz/compress/",
         timeout: float = 30.0,
         default_params: Optional[Dict[str, Any]] = None,
     ):

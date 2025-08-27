@@ -36,9 +36,10 @@ class Evaluator:
         self.bleurt_metric = BLEURT()
 
 
-        # LLM judge
+        # LLM judge - use provided model object or fallback to model name
         self.llm_judge_model = (
-            TransformersModel(model_name=llm_model_name) if llm_model_name else None
+            llm_judge_model or
+            (TransformersModel(model_name=llm_model_name) if llm_model_name else None)
         )
     def _score_metric(self, metric, pred, golds, bads) -> float:
         return (
@@ -169,7 +170,7 @@ Respond with only a number between 0.0 and 1.0 (e.g., 0.8)."""
         if "bleurt" in allowed_metrics:
             result.bleurt = max(self.bleurt_metric.compute([normalized_pred], [g]) for g in normalized_golds) if normalized_golds else 0.0
         if "llm_judge" in allowed_metrics:
-            result.llm_judge = self._llm_score(pred, golds) if golds else 0.0  # Use original text for LLM judge
+            result.llm_judge = self._llm_score(pred, golds) if golds and self.llm_judge_model else 0.0  # Use original text for LLM judge
         if "mc_accuracy" in allowed_metrics:
             # For TruthfulQA, check if prediction matches any correct answer
             # Use both exact match and partial containment for flexibility

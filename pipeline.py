@@ -38,6 +38,7 @@ class Pipeline:
         self.keep_context = keep_context
         self.evaluator = evaluator
         self.evaluate_all_stages = evaluate_all_stages
+        self.aggregated_metrics = AggregatedMetrics()
 
     def _dbg(self, *parts):
         if self.debug:
@@ -158,7 +159,7 @@ class Pipeline:
                 if self.evaluate_all_stages and self.evaluator and stage.__class__.__name__ != "ConfidenceCheckStage":
                     golds = ex.correct_answers if ex.correct_answers else [ex.y_true] if ex.y_true else []
                     if golds:
-                        stage_eval = self.evaluator._evaluate_example(pred=res.answer, golds=golds)
+                        stage_eval = self.evaluator._evaluate_example(pred=res.answer, golds=golds, bads=ex.incorrect_answers)
                         res.evidence = res.evidence or {}
                         res.evidence["stage_eval"] = stage_eval.model_dump()
                         self._dbg(f"Stage Eval: EM={stage_eval.em:.3f}, F1={stage_eval.f1:.3f}, ROUGE1={stage_eval.rouge1:.3f}, LLM_Judge={stage_eval.llm_judge:.3f}")
@@ -203,10 +204,11 @@ def get_template_for_dataset(template_name: str, dataset_schema: str) -> str:
 def build_pipeline(
     config: Dict[str, Any],
     models: Dict[str, Model],
+    evaluator,
 ) -> Pipeline:
     # Get dataset schema for template selection
-    dataset_schema = getattr(evaluator, 'dataset', None)
-    dataset_schema_name = getattr(dataset_schema, 'schema', None) if dataset_schema else None
+    dataset = getattr(evaluator, 'dataset', None)
+    dataset_schema_name = getattr(dataset, 'schema', None) if dataset else None
     
     # Gate
     gate_cfg = config.get("gate", {"mode": "none"})

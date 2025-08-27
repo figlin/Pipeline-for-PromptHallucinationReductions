@@ -5,7 +5,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from dataset import AggregatedMetrics, dataset, load_from_csv
+from dataset import AggregatedMetrics, dataset, load_from_csv, EvalResult
 from evaluate import Evaluator
 from models import Model, ScaleDownCompressionWrapper, ScaleDownLLMWrapper, GeminiModel, OllamaModel
 from pipeline import DEFAULT_TEMPLATES, build_pipeline
@@ -149,19 +149,14 @@ if __name__ == "__main__":
         print(f"Error: No data loaded from '{dataset_path}'. Exiting.", file=sys.stderr)
         sys.exit(1)
     
-    pipe = build_pipeline(config, models, dataset_to_run)
-    # re-wrap with debug (or pass debug into a factory if you prefer)
-    pipe.debug = DEBUG
-    pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN") or "220")
-
-    evaluator = Evaluator(dataset=dataset_to_run, llm_judge_model=models.get("judge"))
-    
     # Load pipeline configuration based on dataset or environment setting
     dataset_schema = getattr(dataset_to_run, 'schema', None) if dataset_to_run else None
     config = get_config(config_name, dataset_schema)
     
     # Override debug setting from environment
     config["debug_context"] = DEBUG_CONTEXT
+    
+    evaluator = Evaluator(dataset=dataset_to_run, llm_judge_model=models.get("judge"))
     
     print(f"Using pipeline configuration: '{config_name}' for dataset: {dataset_schema}")
     if config.get("gate", {}).get("mode") == "metric":
@@ -172,6 +167,7 @@ if __name__ == "__main__":
     # re-wrap with debug (or pass debug into a factory if you prefer)
     pipe.debug = DEBUG
     pipe.debug_maxlen = int(os.getenv("PIPE_DEBUG_MAXLEN") or "220")
+    pipe.evaluate_all_stages = True  # Enable per-stage evaluation
     
     total = EvalResult()
     gate_exit_counts = {}  # Track where each prompt exited
@@ -190,11 +186,39 @@ if __name__ == "__main__":
         result=evaluator._evaluate_example(
             pred=trace.final_answer,
             golds=golds,
+            bads=ex.incorrect_answers,
         )
+        
+        # Add result to total
+        total.n += result.n
+        total.em += result.em
+        total.f1 += result.f1
+        total.rouge1 += result.rouge1
+        total.bleurt += result.bleurt
+        total.llm_judge += result.llm_judge
+        total.mc_accuracy += result.mc_accuracy
+        
         expected = ex.y_true or (ex.correct_answers[0] if ex.correct_answers else "N/A")
         print(f"[{ex.qid}] Q: {ex.question}")
         print(f"  Expected: {expected}")
         print("  Final:", trace.final_answer)
+        
+        # Show stage-by-stage results for this question
+        if hasattr(trace, 'stage_results') and trace.stage_results:
+            print("  Stage Results:")
+            for stage_result in trace.stage_results:
+                stage_id = stage_result.stage_id
+                answer = stage_result.answer or "<No answer>"
+                # Calculate metrics for this single result by comparing with gold
+                single_result = evaluator._evaluate_example(
+                    pred=stage_result.answer,
+                    golds=golds,
+                    bads=ex.incorrect_answers,
+                )
+                print(f"    {stage_id}: {answer}")
+                print(f"      EM={single_result.em:.3f}, F1={single_result.f1:.3f}, ROUGE1={single_result.rouge1:.3f}, BLEURT={single_result.bleurt:.3f}, LLM_Judge={single_result.llm_judge:.3f}, MC_Accuracy={single_result.mc_accuracy:.3f}")
+        else:
+            print("  (Stage-by-stage results not available)")
         
         exit_technique = "Completed All Stages"
         if trace.early_exit_at:
@@ -214,14 +238,31 @@ if __name__ == "__main__":
         #     is_correct = trace.final_answer and trace.final_answer.strip().lower() == ex.y_true.lower()
         #     print("  Correct:", is_correct)
 
-    total.em /= total.n
-    total.f1 /= total.n
-    total.rouge1 /= total.n
-    total.bleurt /= total.n
-    total.llm_judge /= total.n
-    total.mc_accuracy /= total.n
+    if total.n > 0:
+        total.em /= total.n
+        total.f1 /= total.n
+        total.rouge1 /= total.n
+        total.bleurt /= total.n
+        total.llm_judge /= total.n
+        total.mc_accuracy /= total.n
     print("Final Report: ", total.model_dump())
     print("-" * 50)
+    
+    # Print per-stage metrics if available
+    if hasattr(pipe, 'aggregated_metrics') and pipe.aggregated_metrics._results:
+        print("\n=== Per-Stage Performance ===")
+        for stage_name, stage_result in pipe.aggregated_metrics._results.items():
+            if stage_result.n > 0:
+                avg_result = EvalResult(
+                    n=stage_result.n,
+                    em=stage_result.em / stage_result.n,
+                    f1=stage_result.f1 / stage_result.n,
+                    rouge1=stage_result.rouge1 / stage_result.n,
+                    bleurt=stage_result.bleurt / stage_result.n,
+                    llm_judge=stage_result.llm_judge / stage_result.n,
+                    mc_accuracy=stage_result.mc_accuracy / stage_result.n
+                )
+                print(f"{stage_name}: {avg_result.model_dump()}")
     
     # Print gate exit summary table
     print("\n=== Gate Exit Summary ===")

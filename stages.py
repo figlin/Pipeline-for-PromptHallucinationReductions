@@ -103,7 +103,8 @@ class MetricGate:  # exit based on evaluation metrics
         try:
             result = self.evaluator._evaluate_example(
                 pred=candidate_answer,
-                golds=golds
+                golds=golds,
+                bads=example.incorrect_answers
             )
         except Exception:
             return False
