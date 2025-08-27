@@ -1,0 +1,14 @@
+{
+  "dataset": "simpleqa",
+  "config": "baseline",
+  "n": 5,
+  "binary_accuracy": 0.0,
+  "n_evaluated": 5,
+  "avg_tokens": 21.8,
+  "p50_tokens": 18.0,
+  "p90_tokens": 44.4,
+  "early_exit_histogram": {
+    "no_exit": 5
+  },
+  "runtime_sec": 0.0
+}
