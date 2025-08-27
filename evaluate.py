@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, List, Callable, Union, Optional
 
 from lighteval.metrics.metrics_sample import ExactMatches, F1_score, ROUGE, BLEURT
@@ -37,6 +38,33 @@ class Evaluator:
         self.llm_judge_model = (
             TransformersModel(model_name=llm_model_name) if llm_model_name else None
         )
+    def _score_metric(self, metric, pred, golds, bads) -> float:
+        return (
+            max((metric.compute(predictions=[pred], golds=[g]) for g in golds), default=0.0)
+            - max((metric.compute(predictions=[pred], golds=[b]) for b in bads), default=0.0)
+        )
+    
+    def _is_no_answer(self, text: str) -> bool:
+        if text is None:
+            return True
+
+        t = text.strip().lower()
+        if not t:
+            return True
+        
+        patterns = [
+            r"\bi\s*(do\s*not|don'?t)\s*know\b",   # "i don't know", "i do not know"
+            r"\bno\s*idea\b",                      # "no idea"
+            r"\bno\s*answer\b",                    # "no answer"
+            r"\bnot\s*sure\b",                     # "not sure"
+            r"\b(can('?t|not)|unable)\s*answer\b", # "can't answer", "cannot answer", "unable to answer"
+            r"\bnone\b",                           # "none"
+            r"\bnothing\b",                        # "nothing"
+            r"\bunsure\b",                         # "unsure"
+            r"\bunknown\b",                        # "unknown"
+        ]
+
+        return any(re.search(p, t) for p in patterns)
 
     def _get_predictions(self) -> List[str]:
         if self.predictions is not None:
@@ -58,23 +86,46 @@ class Evaluator:
       output = self.llm_judge_model.score(prompt)  # TransformersModel provides .score()
       return output
 
-    def _evaluate_example(self, pred: str, golds: list, is_mc: bool = False) -> EvalResult:
+    def _evaluate_example(self, pred: str, golds: list, bads: list, is_mc: bool = False) -> EvalResult:
         dataset_name = self.dataset.schema
         allowed_metrics = self.metrics_to_use.get(dataset_name, [])
 
+        valid_golds = [g for g in golds if g is not None]
+
         result = EvalResult(n=1)
+
+        if self._is_no_answer(pred):
+            if any(self._is_no_answer(g) for g in valid_golds):
+                if "em" in allowed_metrics:
+                    result.em = 1.0
+                if "f1" in allowed_metrics:
+                    result.f1 = 1.0
+                if "rouge1" in allowed_metrics:
+                    result.rouge1 = 1.0
+                if "bleurt" in allowed_metrics:
+                    result.bleurt = 1.0
+                if "llm_judge" in allowed_metrics:
+                    result.llm_judge = 1.0
+                if "mc_accuracy" in allowed_metrics and is_mc:
+                    result.mc_accuracy = 1.0
+            else:
+                pass
+            return result
+
+        filtered_golds = [g for g in valid_golds if not self._is_no_answer(g)]
+
         if "em" in allowed_metrics:
-            result.em = max(self.exact_match.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.em = max(self.exact_match.compute([pred], [g]) for g in filtered_golds) if filtered_golds else 0.0
         if "f1" in allowed_metrics:
-            result.f1 = max(self.f1_score.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.f1 = max(self.f1_score.compute([pred], [g]) for g in filtered_golds) if filtered_golds else 0.0
         if "rouge1" in allowed_metrics:
-            result.rouge1 = max(self.rouge1_metric.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.rouge1 = self._score_metric(self.rouge1_metric, pred, filtered_golds, bads)
         if "bleurt" in allowed_metrics:
-            result.bleurt = max(self.bleurt_metric.compute([pred], [g]) for g in golds) if golds else 0.0
+            result.bleurt = self._score_metric(self.bleurt_metric, pred, filtered_golds, bads)
         if "llm_judge" in allowed_metrics:
-            result.llm_judge = max(self._llm_score(pred, g) for g in golds) if golds else 0.0
+            result.llm_judge = max(self._llm_score(pred, g) for g in filtered_golds) if filtered_golds else 0.0
         if "mc_accuracy" in allowed_metrics and is_mc:
-            result.mc_accuracy = 1.0 if pred in golds else 0.0
+            result.mc_accuracy = 1.0 if pred in filtered_golds else 0.0
 
         return result
 
@@ -84,8 +135,9 @@ class Evaluator:
         total = EvalResult()
         for ex, pred in zip(self.dataset, preds):
             golds = ex.correct_answers or [ex.y_true]
+            bads = ex.incorrect_answers
             is_mc = bool(ex.correct_answers and ex.incorrect_answers)
-            result = self._evaluate_example(pred, golds, is_mc=is_mc)
+            result = self._evaluate_example(pred=pred, golds=golds, bads=bads, is_mc=is_mc)
 
             # Aggregate results
             total.n += result.n
