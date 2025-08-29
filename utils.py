@@ -8,15 +8,18 @@ from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dataset import QAResponse
-
 @dataclass
 class Example:
-    # using y_true only in offline eval
+    """Use y_true only in offline eval. In production, omit it."""
     qid: str
     question: str
     y_true: Optional[str] = None
 
-# core data structures flowing through the pipeline
+# Assuming dataset.py is in the same directory
+# -------------------------
+# Core data structures
+# -------------------------
+
 @dataclass
 class ModelResponse:
     text: str
@@ -43,7 +46,7 @@ class RunTrace:
     total_tokens: int = 0
     total_cost: float = 0.0
     timing_sec: float = 0.0
-    artifacts: Dict[str, Any] = field(default_factory=dict)  # diffs, prompts, raw json
+    artifacts: Dict[str, Any] = field(default_factory=dict)  # e.g., diffs, prompts, raw json
 
 def normalize_text(text: str) -> str:
     if not text:
@@ -56,13 +59,14 @@ def safe_list(val: Union[str, List[str]]) -> List[str]:
     if isinstance(val, list):
         return val
     if isinstance(val, str):
-        # handling semicolon separated fields
+        # handle semicolon-separated fields
         parts = [v.strip() for v in val.split(";") if v.strip()]
         return parts
     return []
 
-# simple token overlap f1 for SimpleQA
+# metrics
 def f1_score(pred: str, truth: str) -> float:
+    """Token overlap F1 for SimpleQA"""
     pred_tokens = pred.split()
     truth_tokens = truth.split()
     common = Counter(pred_tokens) & Counter(truth_tokens)
@@ -75,22 +79,22 @@ def f1_score(pred: str, truth: str) -> float:
 
 def parse_llm_response(llm_output: str) -> Optional[QAResponse]:
     try:
-        from dataset import QAResponse  # importing here to avoid circular import
+        from dataset import QAResponse  # Import here to avoid circular import
         data = json.loads(llm_output)
         return QAResponse(**data)
     except Exception as e:
         print("Parsing failed:", e)
         return None
-
+    
 SCHEMA_REGISTRY = {
     "simpleqa": {
         "keys": {"answer", "problem"},
         "parser": "_parse_simpleqa",
-        "id_keys": ["problem", "metadata"],
+        "id_keys": ["problem", "metadata"],   # ← use both for unique ID
     },
     "truthfulqa": {
         "keys": {"Best Answer", "Question"},
         "parser": "_parse_truthfulqa",
-        "id_keys": ["Question", "Category"],
+        "id_keys": ["Question", "Category"],  # ← combine these
     },
 }
