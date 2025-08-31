@@ -111,14 +111,18 @@ class Dataset:
 
         # Apply range filter if provided
         if range_filter:
-            try:
-                start, end = map(int, range_filter.split('-'))
-                # Convert to 0-based indexing
-                start_idx = max(0, start - 1)
-                end_idx = min(len(raw_data), end)
-                raw_data = raw_data[start_idx:end_idx]
-            except (ValueError, AttributeError):
-                print(f"Warning: Invalid DATASET_RANGE format '{range_filter}'. Expected format: 'start-end' (e.g., '1-50'). Using full dataset.")
+            if range_filter is str:
+                try:
+                    start, end = map(int, range_filter.split('-'))
+                    # Convert to 0-based indexing
+                    start_idx = max(0, start - 1)
+                    end_idx = min(len(raw_data), end)
+                    raw_data = raw_data[start_idx:end_idx]
+                except (ValueError, AttributeError):
+                    print(f"Warning: Invalid DATASET_RANGE format '{range_filter}'. Expected format: 'start-end' (e.g., '1-50'). Using full dataset.")
+            
+            elif isinstance(range_filter, int) and range_filter > 0:
+                raw_data = raw_data[:range_filter]
 
         keys = set(raw_data[0].keys()) if raw_data else set()
         for name, schema in SCHEMA_REGISTRY.items():

@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import difflib
 import time
 
-from dataset import Example, Dataset, AggregatedMetrics
+from dataset import EvalResult, Example, Dataset, AggregatedMetrics
 from evaluate import Evaluator
 from models import Model
 from stages import make_stage, JudgeGate, Stage, GatePolicy, OracleGate, MetricGate
@@ -26,7 +26,7 @@ class Pipeline:
         debug_context: bool = False,    # <-- new: debug all context values
         keep_context: bool = True,      # <-- new: keep context throughout singular question
         evaluator: Optional[object] = None,  # <-- new: evaluator for per-stage evaluation
-        evaluate_all_stages: bool = False    # <-- new: enable per-stage evaluation
+        evaluate_all_stages: bool = True    # <-- new: enable per-stage evaluation
     ):
         self.stages = stages
         self.gate = gate
@@ -103,6 +103,7 @@ class Pipeline:
                 )
             if stage.__class__.__name__ != "ConfidenceCheckStage": # skipped the ConfidenceCheckStage as metrics not applicable
                 self.aggregated_metrics.add_stage_result(stage.__class__.__name__, metrics_)
+                trace.final_metrics = metrics_.model_dump()
                 self._dbg(f" {stage.__class__.__name__} Result : {metrics_.model_dump()}")
 
             # Debug: show prompt/evidence/errors
@@ -163,6 +164,7 @@ class Pipeline:
                         res.evidence = res.evidence or {}
                         res.evidence["stage_eval"] = stage_eval.model_dump()
                         self._dbg(f"Stage Eval: EM={stage_eval.em:.3f}, F1={stage_eval.f1:.3f}, ROUGE1={stage_eval.rouge1:.3f}, LLM_Judge={stage_eval.llm_judge:.3f}")
+
                 
                 if self.do_token_diffs and last_answer:
                     diff = list(difflib.unified_diff(last_answer.split(), res.answer.split(), lineterm=""))

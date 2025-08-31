@@ -14,27 +14,83 @@ from utils import normalize_text
 
 load_dotenv()
 
+# Read env
+SCALEDOWN_API_KEY = os.environ.get("SCALEDOWN_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    
+# Model type configuration from env
+TARGET_MODEL_TYPE = os.getenv("TARGET_MODEL_TYPE", "ollama")  # ollama, gemini, scaledown, scaledown-llm
+HELPER_MODEL_TYPE = os.getenv("HELPER_MODEL_TYPE", "ollama")
+JUDGE_MODEL_TYPE = os.getenv("JUDGE_MODEL_TYPE", "ollama")
+    
+# Ollama settings
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:27b")
+OLLAMA_ENDPOINT = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate")
+    
+# Gemini settings  
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+def create_model(model_type: str, role: str) -> Model:
+    """Create a model based on type and role (target/helper/judge)"""
+    if model_type == "ollama":
+        return OllamaModel(
+            model=OLLAMA_MODEL,
+            endpoint=OLLAMA_ENDPOINT,
+            timeout=240.0,
+        )
+    elif model_type == "gemini":
+        temp = 0.2 if role == "helper" else 0.0
+        return GeminiModel(
+            api_key=GEMINI_API_KEY,
+            model=GEMINI_MODEL,
+            default_params={"temperature": temp}
+        )
+    elif model_type == "scaledown":
+        # ScaleDown compression wrapper - can wrap any base model - defaults to Gemini
+        base_model_type = os.getenv(f"{role.upper()}_BASE_MODEL", "gemini")  # gemini or ollama
+            
+        if base_model_type == "gemini":
+            temp = 0.2 if role == "helper" else 0.0
+            base_model = GeminiModel(
+                api_key=GEMINI_API_KEY,
+                model=GEMINI_MODEL,
+                default_params={"temperature": temp}
+            )
+        elif base_model_type == "ollama":
+            base_model = OllamaModel(
+                model=OLLAMA_MODEL,
+                endpoint=OLLAMA_ENDPOINT,
+                timeout=240.0,
+            )
+        else:
+            raise ValueError(f"Unknown base model type for ScaleDown: {base_model_type}")
+                
+        rate = float(os.getenv(f"SD_RATE_{role.upper()}", "0.7"))
+        return ScaleDownCompressionWrapper(
+            base=base_model,
+            api_key=SCALEDOWN_API_KEY,
+            rate=rate,
+        )
+    elif model_type == "scaledown-llm":
+        # ScaleDown LLM wrapper - direct LLM prompting via ScaleDown API
+        sd_model = os.getenv(f"SD_LLM_MODEL_{role.upper()}", "gpt-4o")  # Default to GPT-4o
+        rate = float(os.getenv(f"SD_LLM_RATE_{role.upper()}", "0.7"))
+        temp = 0.2 if role == "helper" else 0.0
+            
+        return ScaleDownLLMWrapper(
+            api_key=SCALEDOWN_API_KEY,
+            model=sd_model,
+            rate=rate,
+            default_params={"temperature": temp}
+        )
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+        
 # -------------------------
 # Minimal runnable demo
 # -------------------------
 
 if __name__ == "__main__":
-    # Read env
-    SCALEDOWN_API_KEY = os.environ.get("SCALEDOWN_API_KEY")
-    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-    
-    # Model type configuration from env
-    TARGET_MODEL_TYPE = os.getenv("TARGET_MODEL_TYPE", "ollama")  # ollama, gemini, scaledown, scaledown-llm
-    HELPER_MODEL_TYPE = os.getenv("HELPER_MODEL_TYPE", "ollama")
-    JUDGE_MODEL_TYPE = os.getenv("JUDGE_MODEL_TYPE", "ollama")
-    
-    # Ollama settings
-    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:27b")
-    OLLAMA_ENDPOINT = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434/api/generate")
-    
-    # Gemini settings  
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-    
     def get_stage_technique(stage_id: str, stages_config: list) -> str:
         """Get the optimization technique name for a stage"""
         stage_map = {
@@ -51,61 +107,6 @@ if __name__ == "__main__":
                 return stage_map.get(stage["type"], f"Unknown ({stage['type']})")
         return "Unknown Stage"
 
-    def create_model(model_type: str, role: str) -> Model:
-        """Create a model based on type and role (target/helper/judge)"""
-        if model_type == "ollama":
-            return OllamaModel(
-                model=OLLAMA_MODEL,
-                endpoint=OLLAMA_ENDPOINT,
-                timeout=240.0,
-            )
-        elif model_type == "gemini":
-            temp = 0.2 if role == "helper" else 0.0
-            return GeminiModel(
-                api_key=GEMINI_API_KEY,
-                model=GEMINI_MODEL,
-                default_params={"temperature": temp}
-            )
-        elif model_type == "scaledown":
-            # ScaleDown compression wrapper - can wrap any base model - defaults to Gemini
-            base_model_type = os.getenv(f"{role.upper()}_BASE_MODEL", "gemini")  # gemini or ollama
-            
-            if base_model_type == "gemini":
-                temp = 0.2 if role == "helper" else 0.0
-                base_model = GeminiModel(
-                    api_key=GEMINI_API_KEY,
-                    model=GEMINI_MODEL,
-                    default_params={"temperature": temp}
-                )
-            elif base_model_type == "ollama":
-                base_model = OllamaModel(
-                    model=OLLAMA_MODEL,
-                    endpoint=OLLAMA_ENDPOINT,
-                    timeout=240.0,
-                )
-            else:
-                raise ValueError(f"Unknown base model type for ScaleDown: {base_model_type}")
-                
-            rate = float(os.getenv(f"SD_RATE_{role.upper()}", "0.7"))
-            return ScaleDownCompressionWrapper(
-                base=base_model,
-                api_key=SCALEDOWN_API_KEY,
-                rate=rate,
-            )
-        elif model_type == "scaledown-llm":
-            # ScaleDown LLM wrapper - direct LLM prompting via ScaleDown API
-            sd_model = os.getenv(f"SD_LLM_MODEL_{role.upper()}", "gpt-4o")  # Default to GPT-4o
-            rate = float(os.getenv(f"SD_LLM_RATE_{role.upper()}", "0.7"))
-            temp = 0.2 if role == "helper" else 0.0
-            
-            return ScaleDownLLMWrapper(
-                api_key=SCALEDOWN_API_KEY,
-                model=sd_model,
-                rate=rate,
-                default_params={"temperature": temp}
-            )
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
 
     models: Dict[str, Model] = {
         "target": create_model(TARGET_MODEL_TYPE, "target"),

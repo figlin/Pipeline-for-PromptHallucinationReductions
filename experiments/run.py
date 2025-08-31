@@ -1,46 +1,30 @@
 import os
 import argparse
 import time
-import inspect
-from typing import Dict, List, Optional
+from typing import Dict
 
-# ---- Use upstream dataset.py ------------------------------------------------
+from dotenv import load_dotenv
 
-from dataset import Dataset
+from dataset import load_from_csv
+from experiments.logging import CsvLogger, write_summary, CsvStageLogger
+from experiments.metrics import (
+    compute_binary_accuracy,
+    summarize_budget,
+    early_exit_hist,
+    naive_binaryizer,
+)
 
+from evaluate import Evaluator
+from main import create_model
+from models import Model
+from pipeline import build_pipeline
 
-# ---- Dataset wrappers (return List[Example]) --------------------------------
-
-def _load_ds(csv_path: str, limit: Optional[int], range_filter: Optional[str]):
-    ds = Dataset(csv_path, range_filter=range_filter)
-    exs = ds.examples
-    if limit:
-        exs = exs[: int(limit)]
-    return exs
-
-def load_simpleqa(limit: Optional[int] = None, range_filter: Optional[str] = None, **_) -> List:
-    return _load_ds("data/simple_qa_test_set.csv", limit, range_filter)
-
-def load_truthfulqa(limit: Optional[int] = None, range_filter: Optional[str] = None, **_) -> List:
-    return _load_ds("data/TruthfulQA.csv", limit, range_filter)
-
-
-# ---- Evaluator construction (robust to API changes) -------------------------
-
-class DummyEvaluator:
-    """Safe fallback so pipeline doesn't crash if evaluate.py API changes."""
-    dataset = None  # will be set later
-
-    def _evaluate_example(self, *args, **kwargs):
-        # Minimal metrics dict; pipeline can still aggregate/print.
-        return {
-            "em": 0.0,
-            "f1": 0.0,
-            "rouge1": 0.0,
-            "bleurt": 0.0,
-            "llm_judge": 0.0,
-            "mc_accuracy": 0.0,
-        }
+load_dotenv()
+    
+# Model type configuration from env
+TARGET_MODEL_TYPE = os.getenv("TARGET_MODEL_TYPE", "ollama")  # ollama, gemini, scaledown, scaledown-llm
+HELPER_MODEL_TYPE = os.getenv("HELPER_MODEL_TYPE", "ollama")
+JUDGE_MODEL_TYPE = os.getenv("JUDGE_MODEL_TYPE", "ollama")
 
 def _try_call(ctor, models):
     """Try a few common signatures for functions/classes."""
@@ -57,98 +41,6 @@ def _try_call(ctor, models):
     except TypeError:
         pass
     return None
-
-def _build_eval(models: Dict[str, object]):
-    try:
-        import evaluate as EV  # provided by the repo
-    except Exception:
-        return DummyEvaluator()
-
-    # Candidates: function builders or class constructors
-    candidates = []
-    for name in ("build_evaluator", "get_evaluator", "make_evaluator"):
-        if hasattr(EV, name) and callable(getattr(EV, name)):
-            candidates.append(getattr(EV, name))
-    if hasattr(EV, "Evaluator") and inspect.isclass(getattr(EV, "Evaluator")):
-        candidates.append(getattr(EV, "Evaluator"))
-
-    # Try each with multiple signatures
-    for ctor in candidates:
-        try:
-            ev = _try_call(ctor, models)
-            if ev is not None and hasattr(ev, "_evaluate_example"):
-                return ev
-        except Exception:
-            continue
-
-    # Final fallback
-    return DummyEvaluator()
-
-
-# ---- Analytics: logging & metrics ------------------------------------------
-
-from experiments.logging import CsvLogger, write_summary, CsvStageLogger
-from experiments.metrics import (
-    compute_binary_accuracy,
-    summarize_budget,
-    early_exit_hist,
-    naive_binaryizer,
-)
-
-from pipeline import build_pipeline
-
-# Try ScaleDown direct model; fall back to echo so it runs without keys.
-try:
-    from models import ScaledownDirectModel  # type: ignore
-except Exception:
-    ScaledownDirectModel = None  # type: ignore
-
-
-class EchoModel:
-    name = "echo"
-
-    def generate(self, prompt: str, temperature: float = 0.0, **kwargs):
-        from utils import ModelResponse  # import lazily to avoid hard dep at import-time
-
-        last = (prompt or "").splitlines()[-1]
-        text = last if last else "echo"
-        ptok = max(1, len(prompt) // 4)
-        ctok = max(1, len(text) // 4)
-        return ModelResponse(
-            text=text,
-            prompt_tokens=ptok,
-            completion_tokens=ctok,
-            cost=(ptok + ctok) * 1e-6,
-        )
-
-
-def build_models() -> Dict[str, object]:
-    if ScaledownDirectModel and os.getenv("SCALEDOWN_API_KEY") and os.getenv("SCALEDOWN_CHAT_URL"):
-        api = os.environ["SCALEDOWN_API_KEY"]
-        url = os.environ["SCALEDOWN_CHAT_URL"]
-        return {
-            "target": ScaledownDirectModel(
-                api_key=api,
-                endpoint=url,
-                model=os.getenv("SD_MODEL_TARGET", "gemini/gemini-pro"),
-                rate=float(os.getenv("SD_RATE_TARGET", "0.7")),
-            ),
-            "helper": ScaledownDirectModel(
-                api_key=api,
-                endpoint=url,
-                model=os.getenv("SD_MODEL_HELPER", "gemini/gemini-pro"),
-                rate=float(os.getenv("SD_RATE_HELPER", "0.6")),
-            ),
-            "judge": ScaledownDirectModel(
-                api_key=api,
-                endpoint=url,
-                model=os.getenv("SD_MODEL_JUDGE", "gemini/gemini-pro"),
-                rate=float(os.getenv("SD_RATE_JUDGE", "0.0")),
-                default_params={"temperature": 0.0},
-            ),
-        }
-    e = EchoModel()
-    return {"target": e, "helper": e, "judge": e}
 
 
 def get_config(name: str):
@@ -186,47 +78,30 @@ def get_config(name: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", choices=["simpleqa", "truthfulqa"], required=True)
-    ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--dataset_path", type=str, required=True, help="Path to dataset CSV file or HF name with base repo such as base_repo/dataset_name")
+    ap.add_argument("--limit", type=int, help="Limit number of examples to run. if not passed we evaluate the whole dataset. Minimum limit is 2.")
     ap.add_argument("--config", choices=["baseline", "apo", "apo_cove", "apo_cove_sc", "full"], default="full")
+    ap.add_argument("--threshold", type=float, default=0.8, help="Threshold for binarizer")
     ap.add_argument("--out", default="runs")
     ap.add_argument("--range", default=None, help="Optional dataset range like '1-50' (overrides DATASET_RANGE)")
     args = ap.parse_args()
+    
+    dataset_to_run = load_from_csv(csv_path=args.dataset_path, range_filter=args.limit)
 
-    range_filter = args.range or os.getenv("DATASET_RANGE")
+    print(len(dataset_to_run))
 
-    if args.dataset == "simpleqa":
-        data = load_simpleqa(limit=args.limit, range_filter=range_filter)
-    else:
-        data = load_truthfulqa(limit=args.limit, range_filter=range_filter)
+    models: Dict[str, Model] = {
+        "target": create_model(TARGET_MODEL_TYPE, "target"),
+        "helper": create_model(HELPER_MODEL_TYPE, "helper"), 
+        "judge": create_model(JUDGE_MODEL_TYPE, "judge"),
+    }
 
-    models = build_models()
+    evaluator = Evaluator(dataset=dataset_to_run, llm_judge_model=models.get("judge"))
+
     cfg = get_config(args.config)
 
-    evaluator = _build_eval(models)
-    # Ensure evaluator.dataset.schema exists (pipeline expects it)
-    class _SchemaBox:
-        def __init__(self, schema: str):
-            self.schema = schema
-
-    need_set = (
-        not hasattr(evaluator, "dataset")
-        or evaluator.dataset is None
-        or isinstance(evaluator.dataset, dict)
-        or not hasattr(evaluator.dataset, "schema")
-        or evaluator.dataset.schema is None  # type: ignore[attr-defined]
-    )
-    if need_set:
-        try:
-            evaluator.dataset = _SchemaBox(args.dataset)  # type: ignore[attr-defined]
-        except Exception:
-            pass
-
     # Prefer new API (cfg, models, evaluator); fallback to old API (cfg, models)
-    try:
-        pipe = build_pipeline(cfg, models, evaluator)
-    except TypeError:
-        pipe = build_pipeline(cfg, models)
+    pipe = build_pipeline(cfg, models, evaluator)
 
     # Enable console debug from env (best-effort)
     try:
@@ -237,12 +112,11 @@ def main():
 
     traces = []
     t0 = time.time()
-    for ex in data:
+    for ex in dataset_to_run:
         tr = pipe.run_one(ex)
-        tr.y_true = ex.y_true  # for downstream metrics
         traces.append(tr)
 
-    out_dir = f"{args.out}/{args.dataset}/{args.config}"
+    out_dir = f"{args.out}/{os.path.basename(args.dataset_path).split('.')[0]}/{args.config}"
     sample_logger = CsvLogger(out_dir)
     stage_logger = CsvStageLogger(out_dir)
     for tr in traces:
@@ -251,14 +125,17 @@ def main():
     sample_logger.flush()
     stage_logger.flush()
 
-    acc = compute_binary_accuracy(traces, naive_binaryizer)
+    acc = compute_binary_accuracy(
+        traces=traces,
+        to_binary_fn=naive_binaryizer,
+        threshold=args.threshold)
     bud = summarize_budget(traces)
     hist = early_exit_hist(traces)
 
     write_summary(
         out_dir,
         {
-            "dataset": args.dataset,
+            "dataset": args.dataset_path,
             "config": args.config,
             "n": len(traces),
             **acc,

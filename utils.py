@@ -42,6 +42,7 @@ class RunTrace:
     question: str
     stage_results: List[StageResult] = field(default_factory=list)
     final_answer: Optional[str] = None
+    final_metrics: Optional[Dict[str, float]] = None
     early_exit_at: Optional[str] = None
     total_tokens: int = 0
     total_cost: float = 0.0
